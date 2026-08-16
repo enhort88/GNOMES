@@ -22,19 +22,23 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('tools/gameplay_control_pass.py')
-          s=p.read_text()
-          fixes={
-            r"r'    private float moveSpeed\\(Worker w\\)\\{.*?\\n    private Vein chooseVein\\(Worker w\\)\\{.*?\\}'": r"r'    private float moveSpeed\\(Worker w\\)\\{.*?(?=\\n    private void updateMobs)'",
-            r"r'    private void robChest\\(Mob m\\)\\{.*?\\n    \\}\\n\\n    private void attackWorker\\(Mob m,Worker w\\)\\{.*?\\n    \\}'": r"r'    private void robChest\\(Mob m\\)\\{.*?(?=\\n    private void killMob)'",
-            r"r'    private void fireHazard\\(CaveHazard h\\)\\{.*?\\n    \\}\\n\\n    private void invalidateRoutes'": r"r'    private void fireHazard\\(CaveHazard h\\)\\{.*?\\n    private void invalidateRoutes'",
-            r"r'    private void drawHazards\\(Draw d\\)\\{.*?\\n    \\}\\n\\n    private void drawFx'": r"r'    private void drawHazards\\(Draw d\\)\\{.*?\\n    private void drawFx'",
-            r"r'    private boolean handleWorldTap\\(float x,float y\\)\\{.*?\\n    \\}\\n\\n    private void buyGlobal'": r"r'    private boolean handleWorldTap\\(float x,float y\\)\\{.*?\\n    private void buyGlobal'",
-          }
-          for old,new in fixes.items():
-              if old not in s:
-                  raise SystemExit('migration pattern not found: '+old)
-              s=s.replace(old,new,1)
-          p.write_text(s)
+          lines=p.read_text().splitlines()
+          rules=[
+              ('private float moveSpeed', 'private Vein chooseVein', r"    r'    private float moveSpeed\(Worker w\)\{.*?(?=\n    private void updateMobs)',"),
+              ('private void robChest', 'private void attackWorker', r"    r'    private void robChest\(Mob m\)\{.*?(?=\n    private void killMob)',"),
+              ('private void fireHazard', 'private void invalidateRoutes', r"    r'    private void fireHazard\(CaveHazard h\)\{.*?\n    private void invalidateRoutes',"),
+              ('private void drawHazards', 'private void drawFx', r"    r'    private void drawHazards\(Draw d\)\{.*?\n    private void drawFx',"),
+              ('private boolean handleWorldTap', 'private void buyGlobal', r"    r'    private boolean handleWorldTap\(float x,float y\)\{.*?\n    private void buyGlobal',"),
+          ]
+          found=[False]*len(rules)
+          for i,line in enumerate(lines):
+              for j,(a,b,newline) in enumerate(rules):
+                  if line.lstrip().startswith("r'") and a in line and b in line:
+                      lines[i]=newline
+                      found[j]=True
+          if not all(found):
+              raise SystemExit('missing migration rule(s): '+str([i for i,v in enumerate(found) if not v]))
+          p.write_text('\n'.join(lines)+'\n')
           PY
       - name: Apply gameplay fixes
         run: python3 tools/gameplay_control_pass.py
