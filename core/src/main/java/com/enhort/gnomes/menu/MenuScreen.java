@@ -120,8 +120,8 @@ public final class MenuScreen extends ScreenAdapter {
         float rowR=infoCard.r-14f*ui;
         soundToggle.set(rowR-104f*ui,infoCard.t+16f*ui,rowR,infoCard.t+50f*ui);
         vibrationToggle.set(rowR-104f*ui,infoCard.t+58f*ui,rowR,infoCard.t+92f*ui);
-        volumeDown.set(rowR-104f*ui,infoCard.t+100f*ui,rowR-58f*ui,infoCard.t+134f*ui);
-        volumeUp.set(rowR-46f*ui,infoCard.t+100f*ui,rowR,infoCard.t+134f*ui);
+        volumeDown.set(rowR-142f*ui,infoCard.t+100f*ui,rowR-100f*ui,infoCard.t+134f*ui);
+        volumeUp.set(rowR-42f*ui,infoCard.t+100f*ui,rowR,infoCard.t+134f*ui);
         // GNOMES is centered at y=74. This box covers only the first G, not the whole title.
         cheatG.set(width/2f-86f*ui,44f*ui,width/2f-45f*ui,96f*ui);
     }
