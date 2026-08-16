@@ -1,0 +1,402 @@
+name: gameplay-control-pass
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Apply gameplay fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def sub(path, pattern, repl, flags=re.S):
+              p=Path(path)
+              s=p.read_text()
+              ns,n=re.subn(pattern,repl,s,count=1,flags=flags)
+              if n!=1:
+                  raise SystemExit(f'pattern not found exactly once in {path}: {pattern[:100]}')
+              p.write_text(ns)
+
+          def rep(path, old, new):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f'pattern not found in {path}: {old[:120]!r}')
+              p.write_text(s.replace(old,new,1))
+
+          cave='core/src/main/java/com/enhort/gnomes/game/CaveScreen.java'
+          state='core/src/main/java/com/enhort/gnomes/game/GameState.java'
+
+          # Generic player command target: ore, enemy, or an arbitrary tunnel point.
+          rep(cave,
+              '    private enum WorkerAction { IDLE, WALK, CARRY, MINE, FIGHT, STUNNED }\n    private enum Tab { GNOMES, UPGRADES, ARTIFACTS, RUNES }',
+              '    private enum WorkerAction { IDLE, WALK, CARRY, MINE, FIGHT, STUNNED }\n    private enum PriorityKind { NONE, VEIN, MOB, POINT }\n    private enum Tab { GNOMES, UPGRADES, ARTIFACTS, RUNES }')
+
+          rep(cave,
+              '        float phase, walkCycle, swing, attackCooldown, stun;\n        boolean hitApplied;',
+              '        float phase, walkCycle, swing, attackCooldown, stun, routeRetry;\n        boolean hitApplied;')
+
+          rep(cave,
+              '    private boolean speedHeld;\n    private Vein priorityVein;\n    private float priorityPulse;',
+              '    private boolean speedHeld;\n    private PriorityKind priorityKind=PriorityKind.NONE;\n    private Vein priorityVein;\n    private Mob priorityMob;\n    private int priorityCell=-1;\n    private float priorityX,priorityY,priorityPulse;\n    private boolean objectiveReminderShown;')
+
+          rep(cave,
+              '        mobs.clear();hazards.clear();fx.clear();veins.clear();priorityVein=null;',
+              '        mobs.clear();hazards.clear();fx.clear();veins.clear();clearPriority(false);objectiveReminderShown=false;')
+
+          # Level 1 is now an explicit onboarding objective: create one tier-2 gnome, then clear the mine.
+          sub(cave,
+              r'        boolean any=false;for\(Vein v:veins\)if\(!v\.dead\)\{any=true;break;\}\n        if\(!any&&levelClearTimer<0\)\{levelClearTimer=1\.4f;toast="УРОВЕНЬ ОЧИЩЕН";toastTime=1\.4f;\}\n        if\(levelClearTimer>=0\)\{levelClearTimer-=dt;if\(levelClearTimer<=0\)generateDepth\(true\);\}',
+              '''        boolean any=false;for(Vein v:veins)if(!v.dead){any=true;break;}
+        if(!any&&levelClearTimer<0){
+            if(levelObjectiveMet()){
+                levelClearTimer=1.4f;toast="УРОВЕНЬ ПРОЙДЕН";toastTime=1.4f;
+            }else if(!objectiveReminderShown){
+                objectiveReminderShown=true;toast=levelObjectiveToast();toastTime=2.4f;
+            }
+        }
+        if(levelClearTimer>=0){levelClearTimer-=dt;if(levelClearTimer<=0)generateDepth(true);}''')
+
+          # Worker update: no per-frame ArrayList copy, explicit commands override everything,
+          # and a hired guardian means only a defense squad leaves production.
+          sub(cave,
+              r'    private void updateWorkers\(float dt\)\{.*?\n    \}\n\n    private void mine',
+              '''    private void updateWorkers(float dt){
+        int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
+        for(int i=workers.size()-1;i>=0;i--){
+            Worker w=workers.get(i);
+            w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;if(w.routeRetry>0)w.routeRetry-=dt;
+            if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
+
+            if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){
+                w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;
+            }
+            if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){
+                w.vein=null;w.mob=priorityMob;fight(w,priorityMob,dt);continue;
+            }
+            if(priorityKind==PriorityKind.POINT&&priorityCell>=0){
+                w.vein=null;w.mob=null;moveToPriorityPoint(w,dt);continue;
+            }
+
+            Mob enemy=null;
+            if(defendersLeft>0)enemy=nearestMob(w.x,w.y);
+            if(enemy!=null){defendersLeft--;w.mob=enemy;w.vein=null;fight(w,enemy,dt);continue;}
+
+            w.mob=null;
+            float cap=w.tier.cargoCapacity*state.carryMultiplier(w.tier.ordinal());
+            if(w.hasCargo()&&w.cargo()>=cap*.92){carryHome(w,dt);continue;}
+            if(w.vein==null||w.vein.dead||map.isBlocked(w.vein.cell))w.vein=chooseVein(w);
+            if(w.vein!=null)mine(w,w.vein,dt); else if(w.hasCargo())carryHome(w,dt); else {w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
+        }
+    }
+
+    private int guardianDefenderQuota(){
+        if(workers.isEmpty())return 0;
+        float fraction=.18f/(1f+state.guardianLevel*.22f);
+        return Math.max(1,Math.min(12,(int)Math.ceil(workers.size()*fraction)));
+    }
+
+    private void moveToPriorityPoint(Worker w,float dt){
+        if(!atCell(w,priorityCell)){
+            w.action=WorkerAction.WALK;routeWorker(w,priorityCell);followWorker(w,moveSpeed(w),dt);return;
+        }
+        float a=w.visualId*2.3999632f;
+        float spread=Math.min(cellW,cellH)*(.035f+.055f*((w.visualId%7)/6f));
+        float tx=priorityX+(float)Math.cos(a)*spread,ty=priorityY+(float)Math.sin(a)*spread;
+        w.action=WorkerAction.WALK;moveDirect(w,tx,ty,moveSpeed(w),dt);
+        if(distance(w.x,w.y,tx,ty)<2.5f*ui){w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
+    }
+
+    private void moveDirect(Worker w,float tx,float ty,float speed,float dt){
+        float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
+        if(di<.001f){w.vx=w.vy=0;return;}
+        float step=Math.min(di,speed*dt),nx=dx/di,ny=dy/di;
+        w.vx=nx*speed;w.vy=ny*speed;w.x+=nx*step;w.y+=ny*step;w.walkCycle+=step/(5f*ui);
+    }
+
+    private void mine''')
+
+          # Robust path traversal at extreme logistics levels and retry throttling for unreachable goals.
+          sub(cave,
+              r'    private float moveSpeed\(Worker w\)\{.*?\n    private Vein chooseVein\(Worker w\)\{.*?\}',
+              '''    private float moveSpeed(Worker w){return w.tier.moveSpeed*state.speedMultiplier(w.tier.ordinal())*ui;}
+    private void routeWorker(Worker w,int goal){
+        if(w.goalCell==goal&&w.path.length>0)return;
+        if(w.goalCell==goal&&w.routeRetry>0)return;
+        w.goalCell=goal;w.path=map.path(cellFor(w.x,w.y),goal);w.pathIndex=Math.min(1,w.path.length);
+        w.routeRetry=w.path.length==0?.28f:0f;
+    }
+    private void followWorker(Worker w,float speed,float dt){
+        if(w.path.length==0||w.pathIndex>=w.path.length){w.vx=w.vy=0;return;}
+        float remaining=Math.max(0,speed*dt),moved=0;int guard=0;float lastNx=0,lastNy=0;
+        while(remaining>.001f&&w.pathIndex<w.path.length&&guard++<20){
+            int node=w.path[w.pathIndex];float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
+            if(di<.001f){w.x=tx;w.y=ty;w.pathIndex++;continue;}
+            float nx=dx/di,ny=dy/di;lastNx=nx;lastNy=ny;
+            if(di<=remaining){w.x=tx;w.y=ty;w.pathIndex++;remaining-=di;moved+=di;}
+            else{w.x+=nx*remaining;w.y+=ny*remaining;moved+=remaining;remaining=0;}
+        }
+        if(moved>0){w.vx=lastNx*speed;w.vy=lastNy*speed;w.walkCycle+=moved/(5f*ui);}else w.vx=w.vy=0;
+        if(w.pathIndex>=w.path.length){w.vx=w.vy=0;}
+    }
+
+    private Vein chooseVein(Worker w){Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead||map.isBlocked(v.cell))continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}''')
+
+          # Imps steal all resource types for real. Combat deaths come from demons/golems/bosses, never imps.
+          sub(cave,
+              r'    private void robChest\(Mob m\)\{.*?\n    \}\n\n    private void attackWorker\(Mob m,Worker w\)\{.*?\n    \}',
+              '''    private void robChest(Mob m){
+        if(m.attackCooldown>0)return;m.attackCooldown=m.type==EnemyType.IMP_KING?1.7f:2.5f;m.attack=.42f;
+        long[] stolen=state.stealFromChest(state.depth,m.type==EnemyType.IMP_KING);
+        long value=stolen[0]+stolen[1]*8L+stolen[2]*20L+stolen[3]*100L;
+        if(value>0){toast=lootToast(stolen);toastTime=1.7f;spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFC04A,8);game.audio.play(GameAudio.Sfx.COIN,.65f);game.audio.vibrate(40);}
+    }
+
+    private String lootToast(long[] s){
+        StringBuilder b=new StringBuilder("БЕС УКРАЛ: ");
+        if(s[0]>0)b.append("кам ").append(s[0]).append(' ');
+        if(s[1]>0)b.append("Ag ").append(s[1]).append(' ');
+        if(s[2]>0)b.append("Au ").append(s[2]).append(' ');
+        if(s[3]>0)b.append("◆ ").append(s[3]);
+        return b.toString().trim();
+    }
+
+    private void attackWorker(Mob m,Worker w){
+        if(w==null||m.attackCooldown>0||m.type==EnemyType.IMP||m.type==EnemyType.IMP_KING)return;
+        m.attackCooldown=1.0f;m.attack=.40f;w.stun=Math.max(w.stun,.38f+m.type.contactPower*.025f);spawnSparks(w.x,w.y,0xFFFF765D,4);
+        float survive=state.hazardSurvivalBonus(w.tier.ordinal());
+        float lethality=Math.min(.34f,.008f+m.type.contactPower*.006f);
+        if(m.type==EnemyType.DEMON_KING||m.type==EnemyType.ELEMENTAL_KING)lethality=Math.min(.45f,lethality*1.45f);
+        if(random.nextFloat()<lethality*(1-survive))loseWorker(w,m.type.title+" убил гнома");
+    }''')
+
+          # User-target mob death clears the explicit command cleanly.
+          rep(cave,
+              '    private void killMob(Mob m){\n        if(m.dead)return;m.dead=true;m.attack=-2f;state.enemiesDefeated++;spawnDeath(m);screenShake=Math.max(screenShake,2.2f*ui);',
+              '    private void killMob(Mob m){\n        if(m.dead)return;m.dead=true;m.attack=-2f;state.enemiesDefeated++;spawnDeath(m);screenShake=Math.max(screenShake,2.2f*ui);\n        if(priorityKind==PriorityKind.MOB&&priorityMob==m){clearPriority(false);toast="ЦЕЛЬ УНИЧТОЖЕНА";toastTime=1.2f;}')
+
+          # Hazards are meaningfully lethal. Flood disrupts, while pit/lava/collapse can kill.
+          sub(cave,
+              r'    private void fireHazard\(CaveHazard h\)\{.*?\n    \}\n\n    private void invalidateRoutes',
+              '''    private void fireHazard(CaveHazard h){
+        screenShake=Math.max(screenShake,h.type==HazardType.COLLAPSE?5f*ui:2f*ui);
+        if(h.type==HazardType.COLLAPSE&&map.blockCell(h.cell)){h.obstacleActive=true;invalidateRoutes();game.audio.play(GameAudio.Sfx.COLLAPSE,.92f);game.audio.vibrate(120);}
+        else {game.audio.play(GameAudio.Sfx.HAZARD,.62f);game.audio.vibrate(45);}
+        for(Worker w:new ArrayList<>(workers)){
+            float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;
+            float survive=state.hazardSurvivalBonus(w.tier.ordinal());
+            switch(h.type){
+                case FLOOD -> w.stun=Math.max(w.stun,1.8f);
+                case LAVA -> {w.stun=Math.max(w.stun,.8f);if(random.nextFloat()<.20f*(1-survive))loseWorker(w,"сгорел в лаве");}
+                case PIT -> {if(random.nextFloat()<.24f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1.2f);}
+                case COLLAPSE -> {if(random.nextFloat()<.28f*(1-survive))loseWorker(w,"погиб под обвалом");else w.stun=Math.max(w.stun,1.1f);}
+            }
+        }
+        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,10);
+    }
+
+    private void invalidateRoutes''')
+
+          # Crowd performance: cut particle pressure and stop allocating/sorting one mixed actor list every frame.
+          sub(cave,
+              r'    private void updateFx\(float dt\)\{.*?\n    private void spawnBreak',
+              '''    private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}int limit=workers.size()>120?170:workers.size()>70?230:420;if(fx.size()>limit)fx.subList(0,fx.size()-limit).clear();}
+    private void spawnRockHit(Vein v,int power){int n=workers.size()>120?1:workers.size()>70?2:5+Math.min(5,power);for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-.2f*s,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
+    private void spawnBreak''')
+
+          sub(cave,
+              r'    private void drawWorld\(Draw d\)\{.*?\n    private float wY\(Worker w\)\{return w\.y;\}',
+              '''    private void drawWorld(Draw d){
+        d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawHazards(d);drawVeins(d);drawChest(d);
+        for(int row=0;row<map.rows;row++){
+            for(Worker w:workers)if(rowForY(w.y)==row)drawWorker(d,w);
+            for(Mob m:mobs)if(rowForY(m.y)==row)drawMob(d,m);
+        }
+        drawPriorityOverlay(d);
+        for(Fx p:fx)drawFx(d,p);drawAtmosphere(d);
+    }
+    private int rowForY(float y){return Math.max(0,Math.min(map.rows-1,(int)((y-worldT)/cellH)));}''')
+
+          # Replace flood/collapse visuals with animated cave-scale effects instead of flat shapes.
+          sub(cave,
+              r'    private void drawHazards\(Draw d\)\{.*?\n    \}\n\n    private void drawFx',
+              '''    private void drawHazards(Draw d){
+        for(CaveHazard h:hazards){
+            float warning=Math.min(1f,h.age/1.25f);
+            switch(h.type){
+                case COLLAPSE -> drawCollapseHazard(d,h,warning);
+                case FLOOD -> drawFloodHazard(d,h,warning);
+                case PIT -> {
+                    d.setColor(0xDD020202);d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);
+                    d.setColor(0xFF514A42);d.strokeWidth=2f*ui;d.strokeCircle(h.x,h.y,h.r*.75f);
+                }
+                case LAVA -> {
+                    float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;
+                    d.setColor(alpha(0xFFFF5625,warn));d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);
+                    d.setColor(0xFFFFC13B);for(int i=0;i<4;i++){float a=elapsed*(1+i*.12f)+i;d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);}
+                }
+            }
+        }
+    }
+
+    private void drawCollapseHazard(Draw d,CaveHazard h,float warning){
+        float pulse=.45f+.35f*(float)Math.sin(h.age*15f);
+        if(h.age<1.25f){
+            d.setColor(alpha(0xFFE0A06C,.35f+.35f*warning));d.strokeWidth=(1.2f+warning*1.4f)*ui;
+            for(int i=0;i<5;i++){float ox=(i-2)*h.r*.20f;d.line(h.x+ox,h.y-h.r*.82f,h.x+ox*(.55f),h.y-h.r*(.18f+.08f*(i%2)));}
+            d.setColor(alpha(0xFFB7A18A,.30f+.35f*pulse));for(int i=0;i<8;i++){float x=h.x-h.r*.58f+hash01(h.cell*911L+i*73L)*h.r*1.16f;float y=h.y-h.r*.70f+((h.age*32f+i*11)%32)*ui;d.fillCircle(x,y,(1.2f+i%3*.7f)*ui);}
+            return;
+        }
+        float settle=Math.min(1f,(h.age-1.25f)/.55f);
+        d.setColor(0xAA171411);d.fillOval(h.x-h.r*.88f,h.y-h.r*.10f,h.x+h.r*.88f,h.y+h.r*.48f);
+        for(int i=0;i<17;i++){
+            float q=hash01(h.cell*971L+i*71L),a=i*2.17f+h.cell*.31f;
+            float rr=h.r*(.10f+.72f*q),sz=(4.5f+i%5*1.8f)*ui*settle;
+            float x=h.x+(float)Math.cos(a)*rr,y=h.y+h.r*.12f+(float)Math.sin(a)*rr*.26f;
+            d.setColor(i%3==0?0xFF75695D:i%3==1?0xFF4E4841:0xFF62584E);d.fillCircle(x,y,sz);
+            if(i%4==0){d.setColor(0xFF9A8A78);d.strokeWidth=1.2f*ui;d.line(x-sz*.7f,y-sz*.2f,x+sz*.6f,y+sz*.25f);}
+        }
+        d.setColor(0x668F8173);for(int i=0;i<7;i++){float drift=(h.age*13f+i*17f)%38f;d.fillCircle(h.x+(i-3)*h.r*.15f,h.y-h.r*.10f-drift*ui,(2f+i%3)*ui*(1-Math.min(.85f,(h.age-1.25f)/10f)));}
+    }
+
+    private void drawFloodHazard(Draw d,CaveHazard h,float warning){
+        float t=Math.max(0,h.age-1.25f),dir=(h.cell&1)==0?1f:-1f;
+        if(h.age<1.25f){
+            d.setColor(alpha(0xFF68C8EE,.22f+.38f*warning));d.strokeWidth=(2f+warning*3f)*ui;
+            for(int i=0;i<3;i++){float yy=h.y+(i-1)*h.r*.16f;d.line(h.x-dir*h.r*.72f,yy,h.x+dir*h.r*.72f,yy+(float)Math.sin(h.age*9+i)*h.r*.08f);}
+            return;
+        }
+        float width=h.r*1.10f;
+        d.setColor(0x55399CCB);d.strokeWidth=h.r*.32f;
+        for(int j=0;j<3;j++){
+            float yy=h.y+(j-1)*h.r*.13f;
+            for(int i=0;i<8;i++){
+                float x1=h.x-width+i*(width*2/8f),x2=h.x-width+(i+1)*(width*2/8f);
+                float wave1=(float)Math.sin((i+j*2)*1.4f+t*8f*dir)*h.r*.07f;
+                float wave2=(float)Math.sin((i+1+j*2)*1.4f+t*8f*dir)*h.r*.07f;
+                d.line(x1,yy+wave1,x2,yy+wave2);
+            }
+        }
+        d.setColor(0xBBDDF8FF);d.strokeWidth=1.5f*ui;
+        for(int i=0;i<10;i++){float f=(i*.137f+t*.55f)%1f;float x=h.x-dir*width+dir*f*width*2;float y=h.y-h.r*.24f+(float)Math.sin(i*2.1f+t*7f)*h.r*.12f;d.fillCircle(x,y,(1.3f+i%3*.8f)*ui);}
+        d.setColor(0x446AD6F2);for(int i=0;i<6;i++){float f=(i*.21f+t*.9f)%1f;float x=h.x-dir*width+dir*f*width*2;d.fillOval(x-3f*ui,h.y-h.r*.42f,x+3f*ui,h.y+h.r*.30f);}
+    }
+
+    private void drawFx''')
+
+          # Generic visual marker for current user command.
+          rep(cave,
+              '    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}',
+              '    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(priorityKind==PriorityKind.VEIN&&v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}')
+
+          rep(cave,
+              '    private void drawPriorityMarker(Draw d,Vein v){float p=.5f+.5f*(float)Math.sin(priorityPulse*6f);float rr=v.r*(1.35f+.10f*p);d.setColor(0x66FFD35A);d.strokeWidth=(1.4f+p*1.2f)*ui;d.strokeCircle(v.x,v.y,rr);d.setColor(0xCCFFD35A);d.pathReset();d.moveTo(v.x,v.y-v.r*1.65f);d.lineTo(v.x-v.r*.22f,v.y-v.r*1.35f);d.lineTo(v.x+v.r*.22f,v.y-v.r*1.35f);d.closePath();d.fillPath();}',
+              '''    private void drawPriorityMarker(Draw d,Vein v){float p=.5f+.5f*(float)Math.sin(priorityPulse*6f);float rr=v.r*(1.35f+.10f*p);d.setColor(0x66FFD35A);d.strokeWidth=(1.4f+p*1.2f)*ui;d.strokeCircle(v.x,v.y,rr);d.setColor(0xCCFFD35A);d.pathReset();d.moveTo(v.x,v.y-v.r*1.65f);d.lineTo(v.x-v.r*.22f,v.y-v.r*1.35f);d.lineTo(v.x+v.r*.22f,v.y-v.r*1.35f);d.closePath();d.fillPath();}
+    private void drawPriorityOverlay(Draw d){
+        if(priorityKind==PriorityKind.NONE)return;
+        float p=.5f+.5f*(float)Math.sin(priorityPulse*6f),x=priorityX,y=priorityY,r=13f*ui+p*3f*ui;
+        if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){x=priorityMob.x;y=priorityMob.y;r=priorityMob.type.size*ui*(.78f+.08f*p);}
+        if(priorityKind==PriorityKind.VEIN)return;
+        d.setColor(priorityKind==PriorityKind.MOB?0xAAFF6654:0xAAFFD35A);d.strokeWidth=(1.5f+p)*ui;d.strokeCircle(x,y,r);
+        d.line(x-r*1.25f,y,x-r*.55f,y);d.line(x+r*.55f,y,x+r*1.25f,y);d.line(x,y-r*1.25f,x,y-r*.55f);d.line(x,y+r*.55f,x,y+r*1.25f);
+    }''')
+
+          # HUD shows the current level goal instead of making the player divine it from cave spirits.
+          rep(cave,
+              '        d.bold=false;d.textSize=8.7f*ui;d.setColor(UiTheme.GOLD);d.text("ГЛУБИНА "+state.depth,58f*ui,42f*ui);\n        float y=65f*ui,section=width/4f;',
+              '''        d.bold=false;d.textSize=8.7f*ui;d.setColor(UiTheme.GOLD);d.text("ГЛУБИНА "+state.depth,58f*ui,42f*ui);
+        d.align=Draw.Align.CENTER;d.textSize=7.2f*ui;d.setColor(levelObjectiveMet()?0xFF79C98A:0xFFE2B544);d.text(levelObjectiveShort(),width*.72f,42f*ui);d.align=Draw.Align.LEFT;
+        float y=65f*ui,section=width/4f;''')
+
+          # World tap now always creates a command. Mob gets precedence, then ore, otherwise a tunnel/location order.
+          sub(cave,
+              r'    private boolean handleWorldTap\(float x,float y\)\{.*?\n    \}\n\n    private void buyGlobal',
+              '''    private boolean handleWorldTap(float x,float y){
+        Mob mob=null;float mobD=Float.MAX_VALUE;
+        for(Mob m:mobs){if(m.dead)continue;float q=dist2(x,y,m.x,m.y);float rr=Math.max(18f*ui,m.type.size*ui*.75f);if(q<=rr*rr&&q<mobD){mobD=q;mob=m;}}
+        if(mob!=null){
+            priorityKind=PriorityKind.MOB;priorityMob=mob;priorityVein=null;priorityCell=cellFor(mob.x,mob.y);priorityX=mob.x;priorityY=mob.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • АТАКОВАТЬ "+mob.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
+        }
+
+        Vein best=null;float bd=Float.MAX_VALUE;
+        for(Vein v:veins){if(v.dead)continue;float q=dist2(x,y,v.x,v.y);if(q<bd){bd=q;best=v;}}
+        float pickRadius=Math.min(cellW,cellH)*.80f;
+        if(best!=null&&bd<=pickRadius*pickRadius){
+            priorityKind=PriorityKind.VEIN;priorityVein=best;priorityMob=null;priorityCell=best.cell;priorityX=best.x;priorityY=best.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • ДОБЫВАТЬ "+best.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
+        }
+
+        priorityKind=PriorityKind.POINT;priorityVein=null;priorityMob=null;priorityCell=cellFor(x,y);priorityX=x;priorityY=y;resetWorkerRoutes();
+        toast="ПРИКАЗ • СОБРАТЬСЯ ЗДЕСЬ";toastTime=1.25f;game.audio.play(GameAudio.Sfx.UI,.60f);game.audio.vibrate(14);
+        return true;
+    }
+
+    private void resetWorkerRoutes(){for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;w.routeRetry=0;}}
+    private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
+    private boolean levelObjectiveMet(){return state.depth!=1||state.tierCounts[GnomeTier.VETERAN.ordinal()]>=1;}
+    private String levelObjectiveShort(){return state.depth==1?"ЦЕЛЬ: ПРОДВИНУТЫЙ "+Math.min(1,state.tierCounts[GnomeTier.VETERAN.ordinal()])+"/1":"ЦЕЛЬ: ОЧИСТИТЬ ЖИЛЫ";}
+    private String levelObjectiveToast(){return state.depth==1?"ЦЕЛЬ: СОЗДАЙТЕ 1 ПРОДВИНУТОГО ГНОМА":"ЦЕЛЬ УРОВНЯ НЕ ВЫПОЛНЕНА";}
+
+    private void buyGlobal''')
+
+          # First-level economy is intentionally cheaper so the merge tutorial can actually be completed without a geological epoch.
+          rep(state,
+              '    public long minerBuyCost() {\n        if (FREE_SHOP) return 0;\n        return Math.round(85 * Math.pow(1.27, tierCounts[0]));\n    }',
+              '''    public long minerBuyCost() {
+        if (FREE_SHOP) return 0;
+        if (depth == 1 && tierCounts[0] < 10) return Math.round(35 * Math.pow(1.10, tierCounts[0]));
+        return Math.round(85 * Math.pow(1.27, tierCounts[0]));
+    }''')
+
+          sub(state,
+              r'    public long\[\] stealFromChest\(int depth, boolean king\) \{.*?\n    \}\n\n    public long minerBuyCost',
+              '''    public long[] stealFromChest(int depth, boolean king) {
+        long[] stolen = new long[4];
+        float reduction = chestTheftReduction();
+        double pct = (king ? 0.16 : 0.045) + Math.min(0.08, depth * (king ? 0.0025 : 0.0015));
+        pct = Math.max(0.005, pct * (1.0 - reduction));
+
+        if (stone > 0) { stolen[0] = Math.min(stone, Math.max(1, Math.round(stone * pct))); stone -= stolen[0]; }
+        if (silver > 0) { stolen[1] = Math.min(silver, Math.max(1, Math.round(silver * pct))); silver -= stolen[1]; }
+        if (gold > 0) { stolen[2] = Math.min(gold, Math.max(1, Math.round(gold * pct))); gold -= stolen[2]; }
+        if (diamond > 0) { stolen[3] = Math.min(diamond, Math.max(1, Math.round(diamond * pct))); diamond -= stolen[3]; }
+
+        long value = stolen[0] + stolen[1] * 8L + stolen[2] * 20L + stolen[3] * 100L;
+        stolenValue += value;
+        return stolen;
+    }
+
+    public long minerBuyCost''')
+
+          # Make the first successful merge explicitly acknowledge the level objective.
+          rep(cave,
+              'case GNOMES->{if(state.mergeTier(selectedTier)){syncWorkers(false);toast="ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.4f;}}',
+              'case GNOMES->{if(state.mergeTier(selectedTier)){syncWorkers(false);toast=state.depth==1&&levelObjectiveMet()?"ЦЕЛЬ ВЫПОЛНЕНА • ПРОДВИНУТЫЙ ГНОМ":"ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.6f;}}')
+
+          print('gameplay control pass applied')
+          PY
+      - name: Compile core
+        run: ./gradlew -PskipAndroid :core:compileJava --stacktrace
+      - name: Build Android debug APK
+        run: ./gradlew :android:assembleDebug --stacktrace
+      - name: Commit gameplay fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core
+          git commit -m "Improve command targeting crowd routing hazards and level goals" || exit 0
+          git push
