@@ -1,0 +1,64 @@
+name: gnomes-v06-pass
+
+on:
+  push:
+    branches: [ feature/gnomes-v06 ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Apply GNOMES v0.6 pass
+        run: python3 tools/gnomes_v06_patch.py
+      - name: Static assertions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          cave=Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java').read_text()
+          menu=Path('core/src/main/java/com/enhort/gnomes/menu/MenuScreen.java').read_text()
+          settings=Path('core/src/main/java/com/enhort/gnomes/GameSettings.java').read_text()
+          draw=Path('core/src/main/java/com/enhort/gnomes/draw/Draw.java').read_text()
+          checks={
+            '2x-text':'effectiveSize = textSize * 2.0f' in draw,
+            'spread-veins':'crowdPenalty' in cave and 'assigned++' in cave,
+            'collapse-first':'cleanupLeft>0&&cleanup!=null' in cave,
+            'wet-corridors':'drawWetCorridors' in cave,
+            'fog-blobs':'Organic fog' not in cave and 'for(int i=0;i<6;i++)' in cave,
+            'laser-excavator':'Лазерный экскаватор' in Path('core/src/main/java/com/enhort/gnomes/game/model/GnomeTier.java').read_text(),
+            'laser-golem':'beam>.12f' in cave,
+            'guardian-axe':'attack*118f' in cave,
+            'first-level-veteran':'ASCEND_GNOME' in cave,
+            'music-setting':'musicEnabled' in settings and 'musicToggle' in menu,
+            'replay-intro':'introReplay' in menu and 'openIntro()' in Path('core/src/main/java/com/enhort/gnomes/GnomesGame.java').read_text(),
+            'no-save-menu':'СОХРАНЕНИЯ' not in menu,
+            'bestiary-portraits':'drawEnemyPortrait' in menu,
+          }
+          print(checks)
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('missing: '+','.join(bad))
+          PY
+      - name: Compile core
+        run: ./gradlew -PskipAndroid :core:compileJava --stacktrace
+      - name: Build Android debug APK
+        run: ./gradlew :android:assembleDebug --stacktrace
+      - name: Commit generated pass
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/src/main/java assets/music
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git commit -m "Implement GNOMES v0.6 readability routing art and audio"
+          git push origin HEAD:feature/gnomes-v06
