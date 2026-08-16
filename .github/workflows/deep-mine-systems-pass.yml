@@ -18,6 +18,8 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Normalize migration for Draw API
+        run: sed -i 's/Draw.Align.RIGHT/Draw.Align.CENTER/g' tools/deep_mine_systems_pass.py
       - name: Apply systems pass
         run: python3 tools/deep_mine_systems_pass.py
       - name: Compile core
