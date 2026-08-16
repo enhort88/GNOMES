@@ -8,6 +8,8 @@ import com.enhort.gnomes.game.model.RockType;
 import com.enhort.gnomes.game.model.RuneType;
 
 public class GameState {
+    /** Hidden test flag toggled from the main-menu GNOMES logo. */
+    public static boolean FREE_SHOP = false;
     private static final String PREFS = "gnomes_save_v2";
 
     public long stone = 420;
@@ -213,25 +215,29 @@ public class GameState {
     }
 
     public long guardianCost() {
+        if (FREE_SHOP) return 0;
         if (guardianLevel == 0) return 300;
         return Math.round(260 * Math.pow(1.85, guardianLevel));
     }
 
     public boolean buyOrUpgradeGuardian() {
         long cost = guardianCost();
-        if (guardianLevel < 3) {
-            if (stone < cost) return false;
-            stone -= cost;
-        } else {
-            long silverCost = Math.max(4, cost / 120);
-            if (silver < silverCost) return false;
-            silver -= silverCost;
+        if (!FREE_SHOP) {
+            if (guardianLevel < 3) {
+                if (stone < cost) return false;
+                stone -= cost;
+            } else {
+                long silverCost = Math.max(4, cost / 120);
+                if (silver < silverCost) return false;
+                silver -= silverCost;
+            }
         }
         guardianLevel++;
         return true;
     }
 
     public String guardianCostLabel() {
+        if (FREE_SHOP) return "БЕСПЛАТНО";
         long cost = guardianCost();
         if (guardianLevel < 3) return cost + " кам";
         return Math.max(4, cost / 120) + " Ag";
@@ -266,18 +272,23 @@ public class GameState {
     }
 
     public long minerBuyCost() {
+        if (FREE_SHOP) return 0;
         return Math.round(85 * Math.pow(1.27, tierCounts[0]));
     }
 
     public long tierUpgradeCost(int tier) {
+        if (FREE_SHOP) return 0;
         int lvl = tierLevels[tier];
         return Math.round((70 + tier * 160L) * Math.pow(1.62, lvl - 1));
     }
 
     public boolean buyMiner() {
         long cost = minerBuyCost();
-        if (stone < cost || tierCounts[0] >= 99) return false;
-        stone -= cost;
+        if (tierCounts[0] >= 99) return false;
+        if (!FREE_SHOP) {
+            if (stone < cost) return false;
+            stone -= cost;
+        }
         tierCounts[0]++;
         return true;
     }
@@ -292,26 +303,35 @@ public class GameState {
     public boolean upgradeTier(int tier) {
         if (tier < 0 || tier >= tierLevels.length) return false;
         long cost = tierUpgradeCost(tier);
-        if (tier < 2) {
-            if (stone < cost) return false;
-            stone -= cost;
-        } else if (tier < 4) {
-            if (silver < Math.max(1, cost / 90)) return false;
-            silver -= Math.max(1, cost / 90);
-        } else {
-            if (gold < Math.max(1, cost / 180)) return false;
-            gold -= Math.max(1, cost / 180);
+        if (!FREE_SHOP) {
+            if (tier < 2) {
+                if (stone < cost) return false;
+                stone -= cost;
+            } else if (tier < 4) {
+                if (silver < Math.max(1, cost / 90)) return false;
+                silver -= Math.max(1, cost / 90);
+            } else {
+                if (gold < Math.max(1, cost / 180)) return false;
+                gold -= Math.max(1, cost / 180);
+            }
         }
         tierLevels[tier]++;
         return true;
     }
 
     public long globalUpgradeCost(int kind) {
+        if (FREE_SHOP) return 0;
         int lvl = kind == 0 ? miningUpgrade : kind == 1 ? speedUpgrade : combatUpgrade;
         return Math.round((180 + kind * 120L) * Math.pow(1.72, lvl));
     }
 
     public boolean buyGlobalUpgrade(int kind) {
+        if (FREE_SHOP) {
+            if (kind == 0) miningUpgrade++;
+            else if (kind == 1) speedUpgrade++;
+            else combatUpgrade++;
+            return true;
+        }
         long cost = globalUpgradeCost(kind);
         if (kind == 0) {
             if (stone < cost) return false;
@@ -334,19 +354,23 @@ public class GameState {
     }
 
     public int artifactCost(int artifactIndex) {
+        if (FREE_SHOP) return 0;
         int lvl = artifactLevels[artifactIndex];
         return 1 + artifactIndex + lvl * (2 + artifactIndex);
     }
 
     public boolean upgradeArtifact(int artifactIndex) {
         int cost = artifactCost(artifactIndex);
-        if (diamond < cost) return false;
-        diamond -= cost;
+        if (!FREE_SHOP) {
+            if (diamond < cost) return false;
+            diamond -= cost;
+        }
         artifactLevels[artifactIndex]++;
         return true;
     }
 
     public int runeUpgradeCost(int runeIndex) {
+        if (FREE_SHOP) return 0;
         int lvl = runeLevels[runeIndex];
         return 1 + runeIndex + lvl * (2 + runeIndex);
     }
@@ -354,8 +378,10 @@ public class GameState {
     public boolean upgradeRune(int runeIndex) {
         if (runeIndex < 0 || runeIndex >= runeLevels.length) return false;
         int cost = runeUpgradeCost(runeIndex);
-        if (diamond < cost) return false;
-        diamond -= cost;
+        if (!FREE_SHOP) {
+            if (diamond < cost) return false;
+            diamond -= cost;
+        }
         runeLevels[runeIndex]++;
         return true;
     }

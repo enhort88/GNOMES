@@ -5,6 +5,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.ScreenAdapter;
 import com.enhort.gnomes.GnomesGame;
+import com.enhort.gnomes.GameAudio;
 import com.enhort.gnomes.draw.Draw;
 import com.enhort.gnomes.ui.UiTheme;
 import com.enhort.gnomes.game.model.ArtifactType;
@@ -86,7 +87,7 @@ public final class CaveScreen extends ScreenAdapter {
 
     private static final class CaveHazard {
         final HazardType type; final int cell; final float x,y,r;
-        float age; boolean fired;
+        float age; boolean fired, obstacleActive;
         CaveHazard(HazardType type,int cell,float x,float y,float r){this.type=type;this.cell=cell;this.x=x;this.y=y;this.r=r;}
     }
 
@@ -106,6 +107,8 @@ public final class CaveScreen extends ScreenAdapter {
     private float worldL,worldT,worldR,worldB,cellW,cellH;
     private float elapsed,enemyTimer=13f,hazardTimer=18f,saveTimer,levelClearTimer=-1f,screenShake;
     private boolean speedHeld;
+    private Vein priorityVein;
+    private float priorityPulse;
     private Tab tab=Tab.GNOMES;
     private int selectedTier,selectedArtifact,selectedRune,runeTarget;
     private int nextWorkerId=1;
@@ -127,7 +130,8 @@ public final class CaveScreen extends ScreenAdapter {
             @Override public boolean keyDown(int keycode){if(keycode==Input.Keys.BACK||keycode==Input.Keys.ESCAPE){saveNow();game.openMenu();return true;}return false;}
             @Override public boolean touchDown(int sx,int sy,int pointer,int button){
                 float x=sx,y=sy;
-                if(speed.hit(x,y)){speedHeld=true;return true;}
+                if(speed.hit(x,y)){speedHeld=true;game.audio.play(GameAudio.Sfx.UI,.55f);return true;}
+                if(y>=worldT&&y<=worldB)return handleWorldTap(x,y);
                 return handleTap(x,y);
             }
             @Override public boolean touchUp(int sx,int sy,int pointer,int button){speedHeld=false;return true;}
@@ -180,7 +184,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void generateDepth(boolean advance){
         if(width<=0||height<=0)return;
         if(advance){state.depth++;state.depthProgress=0;saveNow();}
-        mobs.clear();hazards.clear();fx.clear();veins.clear();
+        mobs.clear();hazards.clear();fx.clear();veins.clear();priorityVein=null;
         int cols=9;
         int rows=Math.max(9,Math.min(13,Math.round((worldB-worldT)/(width/cols))));
         long seed=0x9E3779B97F4A7C15L^(long)slot*0xBF58476D1CE4E5B9L^(long)state.depth*0x94D049BB133111EBL;
@@ -257,6 +261,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void update(float dt,float workerTimeScale){
         if(map==null)return;
         if(toastTime>0)toastTime-=dt;
+        priorityPulse+=dt;
         if(screenShake>0)screenShake=Math.max(0,screenShake-dt*18f*ui);
 
         // Acceleration belongs to the workforce, not to the universe. Enemies, hazards, regeneration,
@@ -300,6 +305,9 @@ public final class CaveScreen extends ScreenAdapter {
         for(Worker w:new ArrayList<>(workers)){
             w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;
             if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
+            if(priorityVein!=null&&!priorityVein.dead){
+                w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;
+            }
             Mob enemy=nearestMob(w.x,w.y);
             if(enemy!=null){w.mob=enemy;w.vein=null;fight(w,enemy,dt);continue;}
             w.mob=null;
@@ -318,6 +326,7 @@ public final class CaveScreen extends ScreenAdapter {
         if(w.swing>0&&!w.hitApplied&&progress>=.57f){
             w.hitApplied=true;float damage=w.tier.miningPower*state.tierPowerMultiplier(w.tier.ordinal())*state.miningMultiplier(w.tier.ordinal());
             v.hp-=damage;v.hitFlash=.16f;screenShake=Math.max(screenShake,Math.min(2.8f*ui,.35f*ui+w.tier.ordinal()*.36f*ui));
+            game.audio.play(GameAudio.Sfx.PICK,.32f+.07f*w.tier.ordinal());
             spawnRockHit(v,w.tier.ordinal());
             if(v.hp<=0)breakVein(v,w);
         }
@@ -326,7 +335,9 @@ public final class CaveScreen extends ScreenAdapter {
     private void breakVein(Vein v,Worker w){
         if(v.dead)return;v.dead=true;v.hp=0;v.death=0;w.add(v.type.material,state.yieldFor(v.type,w.tier.ordinal()));
         state.rocksBroken++;state.depthProgress++;spawnBreak(v);screenShake=Math.max(screenShake,3.3f*ui);
-        if(v.type.ordinal()>=RockType.DIAMOND.ordinal()){toast=v.type.title.toUpperCase()+" ДОБЫТ";toastTime=1.4f;}
+        game.audio.play(GameAudio.Sfx.ROCK_BREAK,.88f);game.audio.vibrate(26+Math.min(42,w.tier.ordinal()*7));
+        if(v==priorityVein){priorityVein=null;toast="ПРИОРИТЕТ ДОБЫТ • "+v.type.title.toUpperCase();toastTime=1.5f;}
+        else if(v.type.ordinal()>=RockType.DIAMOND.ordinal()){toast=v.type.title.toUpperCase()+" ДОБЫТ";toastTime=1.4f;}
     }
 
     private void carryHome(Worker w,float dt){
@@ -338,7 +349,7 @@ public final class CaveScreen extends ScreenAdapter {
             if(w.cargoSilver>0)state.deposit(RockType.Material.SILVER,w.cargoSilver);
             if(w.cargoGold>0)state.deposit(RockType.Material.GOLD,w.cargoGold);
             if(w.cargoDiamond>0)state.deposit(RockType.Material.DIAMOND,w.cargoDiamond);
-            w.clearCargo();spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFCC63,5);
+            w.clearCargo();spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFCC63,5);game.audio.play(GameAudio.Sfx.COIN,.42f);
         }
     }
 
@@ -348,7 +359,7 @@ public final class CaveScreen extends ScreenAdapter {
         w.action=WorkerAction.FIGHT;w.vx=w.vy=0;
         if(w.attackCooldown<=0&&w.swing<=0){w.swing=.46f;w.hitApplied=false;w.attackCooldown=Math.max(.18f,.62f-w.tier.ordinal()*.05f);}
         float p=w.swing<=0?1:1-w.swing/.46f;
-        if(w.swing>0&&!w.hitApplied&&p>.53f){w.hitApplied=true;float dmg=w.tier.combatPower*state.tierPowerMultiplier(w.tier.ordinal())*state.combatMultiplier(w.tier.ordinal());m.hp-=dmg;m.attack=.14f;spawnSparks(m.x,m.y,0xFFFFB74D,5);}
+        if(w.swing>0&&!w.hitApplied&&p>.53f){w.hitApplied=true;float dmg=w.tier.combatPower*state.tierPowerMultiplier(w.tier.ordinal())*state.combatMultiplier(w.tier.ordinal());m.hp-=dmg;m.attack=.14f;spawnSparks(m.x,m.y,0xFFFFB74D,5);game.audio.play(GameAudio.Sfx.ENEMY,.32f);}
     }
 
     private float moveSpeed(Worker w){return w.tier.moveSpeed*state.speedMultiplier(w.tier.ordinal())*ui;}
@@ -360,7 +371,7 @@ public final class CaveScreen extends ScreenAdapter {
         if(di>.001f){w.vx=dx/di*speed;w.vy=dy/di*speed;w.x+=w.vx*dt;w.y+=w.vy*dt;w.walkCycle+=dt*(7.5f+speed/(38f*ui));}
     }
 
-    private Vein chooseVein(Worker w){Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead)continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}
+    private Vein chooseVein(Worker w){if(priorityVein!=null&&!priorityVein.dead)return priorityVein;Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead||map.isBlocked(v.cell))continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}
 
     private void updateMobs(float dt){
         List<Mob> summons=new ArrayList<>();
@@ -392,7 +403,7 @@ public final class CaveScreen extends ScreenAdapter {
         long before=state.stone+state.silver*8+state.gold*20+state.diamond*100;
         state.stealFromChest(state.depth,m.type==EnemyType.IMP_KING);
         long after=state.stone+state.silver*8+state.gold*20+state.diamond*100;
-        if(before>after){toast="БЕС В СУНДУКЕ  −"+format(before-after);toastTime=1.5f;spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFC04A,10);}
+        if(before>after){toast="БЕС В СУНДУКЕ  −"+format(before-after);toastTime=1.5f;spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFC04A,10);game.audio.play(GameAudio.Sfx.COIN,.65f);game.audio.vibrate(40);}
         // A thief visibly retreats after every grab instead of becoming a stationary resource vacuum.
         List<Integer> outer=map.outerCells();int goal=outer.get(random.nextInt(outer.size()));m.goalCell=goal;m.path=map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=1.2f;
     }
@@ -414,17 +425,35 @@ public final class CaveScreen extends ScreenAdapter {
     private Worker nearestWorker(float x,float y){Worker best=null;float bd=Float.MAX_VALUE;for(Worker w:workers){float d=dist2(x,y,w.x,w.y);if(d<bd){bd=d;best=w;}}return best;}
     private Mob nearestMob(float x,float y){Mob best=null;float bd=Float.MAX_VALUE;for(Mob m:mobs){if(m.dead)continue;float d=dist2(x,y,m.x,m.y);if(d<bd){bd=d;best=m;}}return best;}
 
-    private void spawnEnemyWave(){EnemyType type=chooseEnemyType();int n=type==EnemyType.IMP?2+random.nextInt(3):1;for(int i=0;i<n;i++)spawnMob(type);toast=type.title.toUpperCase()+(n>1?" ×"+n:"");toastTime=1.3f;}
+    private void spawnEnemyWave(){EnemyType type=chooseEnemyType();int n=type==EnemyType.IMP?2+random.nextInt(3):1;for(int i=0;i<n;i++)spawnMob(type);toast=type.title.toUpperCase()+(n>1?" ×"+n:"");toastTime=1.3f;game.audio.play(GameAudio.Sfx.ENEMY,.48f);}
     private EnemyType chooseEnemyType(){int d=state.depth;float r=random.nextFloat();if(d>=18&&r<.12f)return EnemyType.FIRE_GOLEM;if(d>=15&&r<.25f)return EnemyType.WATER_GOLEM;if(d>=12&&r<.40f)return EnemyType.STONE_GOLEM;if(d>=7&&r<.62f)return EnemyType.DEMON;return EnemyType.IMP;}
-    private void spawnBoss(){EnemyType t=state.depth>=30?EnemyType.ELEMENTAL_KING:state.depth>=20?EnemyType.DEMON_KING:EnemyType.IMP_KING;spawnMob(t);toast="БОСС • "+t.title.toUpperCase();toastTime=2.6f;}
+    private void spawnBoss(){EnemyType t=state.depth>=30?EnemyType.ELEMENTAL_KING:state.depth>=20?EnemyType.DEMON_KING:EnemyType.IMP_KING;spawnMob(t);toast="БОСС • "+t.title.toUpperCase();toastTime=2.6f;game.audio.play(GameAudio.Sfx.BOSS,.90f);game.audio.vibrate(90);}
     private void spawnMob(EnemyType type){List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));Mob m=new Mob(type,cx(map.col(cell)),cy(map.row(cell)),random.nextFloat()*6.28f);if(type.ordinal()>=EnemyType.IMP_KING.ordinal()){float k=1+Math.max(0,state.depth-10)*.07f;m.maxHp*=k;m.hp=m.maxHp;}mobs.add(m);}
 
     private void updateHazards(float dt){
-        for(Iterator<CaveHazard>it=hazards.iterator();it.hasNext();){CaveHazard h=it.next();h.age+=dt;if(!h.fired&&h.age>=1.25f){h.fired=true;fireHazard(h);}if(h.age>hazardDuration(h.type))it.remove();}
+        for(Iterator<CaveHazard>it=hazards.iterator();it.hasNext();){
+            CaveHazard h=it.next();h.age+=dt;
+            if(!h.fired&&h.age>=1.25f){h.fired=true;fireHazard(h);}
+            if(h.age>hazardDuration(h.type)){
+                if(h.obstacleActive){map.unblockCell(h.cell);h.obstacleActive=false;invalidateRoutes();}
+                it.remove();
+            }
+        }
     }
-    private float hazardDuration(HazardType t){return switch(t){case COLLAPSE->3.2f;case PIT->8f;case LAVA->9f;case FLOOD->4.8f;};}
+    private float hazardDuration(HazardType t){return switch(t){case COLLAPSE->16f;case PIT->8f;case LAVA->9f;case FLOOD->4.8f;};}
     private void spawnHazard(){int cell=random.nextInt(map.cols*map.rows);if(cell==map.index(map.startCol,map.startRow))cell=map.index(0,0);HazardType type=HazardType.values()[random.nextInt(HazardType.values().length)];float r=Math.min(cellW,cellH)*(type==HazardType.FLOOD?1.2f:.62f);hazards.add(new CaveHazard(type,cell,cx(map.col(cell)),cy(map.row(cell)),r));toast="ОПАСНОСТЬ • "+type.title;toastTime=1.3f;}
-    private void fireHazard(CaveHazard h){screenShake=Math.max(screenShake,h.type==HazardType.COLLAPSE?5f*ui:2f*ui);for(Worker w:new ArrayList<>(workers)){float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;float survive=state.hazardSurvivalBonus(w.tier.ordinal());switch(h.type){case FLOOD->w.stun=Math.max(w.stun,1.4f);case LAVA-> {w.stun=Math.max(w.stun,.7f);if(random.nextFloat()<.10f*(1-survive))loseWorker(w,"лава");}case PIT-> {if(random.nextFloat()<.12f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1f);}case COLLAPSE-> {if(random.nextFloat()<.16f*(1-survive))loseWorker(w,"попал под обвал");else w.stun=Math.max(w.stun,.9f);}}}spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,14);}
+    private void fireHazard(CaveHazard h){
+        screenShake=Math.max(screenShake,h.type==HazardType.COLLAPSE?5f*ui:2f*ui);
+        if(h.type==HazardType.COLLAPSE&&map.blockCell(h.cell)){h.obstacleActive=true;invalidateRoutes();game.audio.play(GameAudio.Sfx.COLLAPSE,.92f);game.audio.vibrate(120);}
+        else {game.audio.play(GameAudio.Sfx.HAZARD,.62f);game.audio.vibrate(45);}
+        for(Worker w:new ArrayList<>(workers)){float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;float survive=state.hazardSurvivalBonus(w.tier.ordinal());switch(h.type){case FLOOD->w.stun=Math.max(w.stun,1.4f);case LAVA-> {w.stun=Math.max(w.stun,.7f);if(random.nextFloat()<.10f*(1-survive))loseWorker(w,"лава");}case PIT-> {if(random.nextFloat()<.12f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1f);}case COLLAPSE-> {if(random.nextFloat()<.16f*(1-survive))loseWorker(w,"попал под обвал");else w.stun=Math.max(w.stun,.9f);}}}
+        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,14);
+    }
+
+    private void invalidateRoutes(){
+        for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;}
+        for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}
+    }
 
     private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}if(fx.size()>420)fx.subList(0,fx.size()-420).clear();}
     private void spawnRockHit(Vein v,int power){for(int i=0;i<5+Math.min(5,power);i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-.2f*s,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
@@ -462,12 +491,14 @@ public final class CaveScreen extends ScreenAdapter {
         float flick=.82f+.18f*(float)Math.sin(elapsed*9.3f+seed);d.setColor(0x18FF9B32);d.fillCircle(x,y,25f*ui*flick);d.setColor(0x28FFB14A);d.fillCircle(x,y,13f*ui*flick);d.setColor(0xFF6E4930);d.strokeWidth=2.3f*ui;d.line(x,y+9f*ui,x,y+18f*ui);d.setColor(0xFFFF8C2E);d.fillOval(x-3.4f*ui,y-7f*ui,x+3.4f*ui,y+4f*ui);d.setColor(0xFFFFD36A);d.fillOval(x-1.5f*ui,y-4.5f*ui,x+1.5f*ui,y+1f*ui);
     }
 
-    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f)drawVein(d,v);}
+    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}
+    private void drawPriorityMarker(Draw d,Vein v){float p=.5f+.5f*(float)Math.sin(priorityPulse*6f);float rr=v.r*(1.35f+.10f*p);d.setColor(0x66FFD35A);d.strokeWidth=(1.4f+p*1.2f)*ui;d.strokeCircle(v.x,v.y,rr);d.setColor(0xCCFFD35A);d.pathReset();d.moveTo(v.x,v.y-v.r*1.65f);d.lineTo(v.x-v.r*.22f,v.y-v.r*1.35f);d.lineTo(v.x+v.r*.22f,v.y-v.r*1.35f);d.closePath();d.fillPath();}
     private void drawVein(Draw d,Vein v){
         float death=v.dead?Math.max(0,1-v.death/.55f):1;float damage=1-Math.max(0,v.hp)/v.maxHp;float shake=v.hitFlash>0?(float)Math.sin(v.hitFlash*210f)*2.1f*ui*(v.hitFlash/.16f):0;
         d.save();d.translate(shake,0);d.scale(death,death);float x=v.x,y=v.y,r=v.r;
         d.setColor(0x88000000);polyRock(d,v,x+2f*ui,y+3f*ui,r*1.07f,0xFF090909,0);
         polyRock(d,v,x,y,r,adjust(v.type.color,.62f),0);polyRock(d,v,x-r*.08f,y-r*.10f,r*.82f,adjust(v.type.color,.86f),1);
+        drawRockIdentity(d,v,x,y,r,damage);
         // ore veins are embedded lines instead of three arbitrary dots.
         if(v.type!=RockType.STONE&&v.type!=RockType.OBSIDIAN){d.setColor(adjust(v.type.color,1.38f));d.strokeWidth=Math.max(1.4f*ui,r*.10f);for(int i=0;i<3;i++){float yy=y-r*.42f+i*r*.34f;d.line(x-r*.48f,yy,x-r*.10f,yy+r*.15f);d.line(x-r*.10f,yy+r*.15f,x+r*.45f,yy-r*.05f);}}
         drawCracks(d,v,damage);
@@ -478,6 +509,29 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void polyRock(Draw d,Vein v,float x,float y,float r,int color,int layer){d.setColor(color);d.pathReset();int n=9;for(int i=0;i<n;i++){float a=(float)(Math.PI*2*i/n)+((v.seed>>(i%16))&7)*.009f;float sc=.80f+hash01((long)v.seed*31+i*101+layer*77)*.25f;float px=x+(float)Math.cos(a)*r*sc,py=y+(float)Math.sin(a)*r*sc;if(i==0)d.moveTo(px,py);else d.lineTo(px,py);}d.closePath();d.fillPath();}
+
+    private void drawRockIdentity(Draw d,Vein v,float x,float y,float r,float damage){
+        switch(v.type){
+            case STONE -> {
+                d.setColor(0xFF555B61);for(int i=0;i<4;i++){float a=i*1.51f+v.seed*.00007f;d.fillOval(x+(float)Math.cos(a)*r*.38f-r*.13f,y+(float)Math.sin(a)*r*.30f-r*.07f,x+(float)Math.cos(a)*r*.38f+r*.13f,y+(float)Math.sin(a)*r*.30f+r*.07f);}
+            }
+            case SILVER -> {
+                d.setColor(0xFFE7EEF4);d.strokeWidth=Math.max(1.2f*ui,r*.075f);for(int i=-1;i<=1;i++)d.line(x-r*.46f,y+i*r*.22f,x+r*.42f,y+(i-.55f)*r*.22f);d.setColor(0xFF8F9BA6);d.fillCircle(x-r*.25f,y+r*.23f,r*.09f);d.fillCircle(x+r*.28f,y-r*.20f,r*.07f);
+            }
+            case GOLD -> {
+                d.setColor(0xFFFFD24E);for(int i=0;i<6;i++){float a=i*1.047f+v.seed*.0001f;float rr=r*(i%2==0?.34f:.22f);d.fillCircle(x+(float)Math.cos(a)*rr,y+(float)Math.sin(a)*rr,r*(.085f+(i%3)*.018f));}d.setColor(0xFFFFF0A6);d.fillCircle(x-r*.18f,y-r*.18f,r*.055f);
+            }
+            case DIAMOND -> {
+                d.setColor(0xFFB9F4FF);d.pathReset();d.moveTo(x,y-r*.62f);d.lineTo(x+r*.46f,y-r*.10f);d.lineTo(x+r*.22f,y+r*.53f);d.lineTo(x-r*.25f,y+r*.50f);d.lineTo(x-r*.48f,y-r*.08f);d.closePath();d.fillPath();d.setColor(0xFF4AB8D4);d.strokeWidth=1.4f*ui;d.line(x,y-r*.58f,x,y+r*.46f);d.line(x-r*.44f,y-r*.07f,x+r*.43f,y-r*.07f);d.line(x,y+r*.46f,x+r*.43f,y-r*.07f);
+            }
+            case OBSIDIAN -> {
+                d.setColor(0xFF17131D);for(int i=0;i<4;i++){float a=i*1.57f+.3f;d.pathReset();d.moveTo(x,y-r*.62f);d.lineTo(x+(float)Math.cos(a)*r*.64f,y+(float)Math.sin(a)*r*.55f);d.lineTo(x+(float)Math.cos(a+.7f)*r*.33f,y+(float)Math.sin(a+.7f)*r*.31f);d.closePath();d.fillPath();}d.setColor(0xFF9A72E8);d.strokeWidth=1.2f*ui;d.line(x-r*.35f,y+r*.28f,x+r*.18f,y-r*.33f);d.line(x+r*.18f,y-r*.33f,x+r*.42f,y+r*.08f);
+            }
+            case ANCIENT_CRYSTAL -> {
+                d.setColor(0x448A5CFF);d.fillCircle(x,y,r*.78f);int[] cols={0xFFBFA8FF,0xFF8A5CFF,0xFFD9CEFF};for(int i=0;i<3;i++){float ox=(i-1)*r*.28f,top=r*(.72f-(i%2)*.18f);d.setColor(cols[i]);d.pathReset();d.moveTo(x+ox,y-top);d.lineTo(x+ox+r*.18f,y+r*.38f);d.lineTo(x+ox-r*.18f,y+r*.38f);d.closePath();d.fillPath();}d.setColor(0xFFFFFFFF);d.fillCircle(x-r*.04f,y-r*.30f,r*.045f);
+            }
+        }
+    }
     private void drawCracks(Draw d,Vein v,float damage){if(damage<.15f)return;d.setColor(0xFF171513);d.strokeWidth=(1.2f+damage*.8f)*ui;int branches=1+(int)(damage*6);for(int i=0;i<branches;i++){float a=(v.seed*.0001f+i*2.399f);float len=v.r*(.20f+.55f*damage);float x1=v.x+(float)Math.cos(a)*v.r*.08f,y1=v.y+(float)Math.sin(a)*v.r*.08f;float mx=x1+(float)Math.cos(a)*len*.52f+(float)Math.sin(a)*len*.12f, my=y1+(float)Math.sin(a)*len*.52f-(float)Math.cos(a)*len*.12f;float x2=x1+(float)Math.cos(a)*len,y2=y1+(float)Math.sin(a)*len;d.line(x1,y1,mx,my);d.line(mx,my,x2,y2);if(damage>.52f)d.line(mx,my,mx+(float)Math.cos(a+1.0f)*len*.30f,my+(float)Math.sin(a+1.0f)*len*.30f);}}
 
     private void drawChest(Draw d){
@@ -541,7 +595,56 @@ public final class CaveScreen extends ScreenAdapter {
         if(m.type==EnemyType.ELEMENTAL_KING)drawCrown(d,0,-s*.82f,s*.78f);d.restore();}
     private void drawCrown(Draw d,float x,float y,float w){d.setColor(0xFFFFD24A);d.pathReset();d.moveTo(x-w*.44f,y+w*.20f);d.lineTo(x-w*.40f,y-w*.16f);d.lineTo(x-w*.16f,y+w*.01f);d.lineTo(x,y-w*.28f);d.lineTo(x+w*.16f,y+w*.01f);d.lineTo(x+w*.40f,y-w*.16f);d.lineTo(x+w*.44f,y+w*.20f);d.closePath();d.fillPath();d.setColor(0xFFFFF1A8);d.fillCircle(x,y-w*.10f,w*.045f);}
 
-    private void drawHazards(Draw d){for(CaveHazard h:hazards){float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;switch(h.type){case COLLAPSE->{d.setColor(alpha(0xFFD57B4F,warn));d.strokeWidth=2f*ui;d.strokeCircle(h.x,h.y,h.r);if(h.age>=1.25f){d.setColor(0xFF62564B);for(int i=0;i<6;i++){float a=i*1.17f+h.age;d.fillCircle(h.x+(float)Math.cos(a)*h.r*.45f,h.y+(float)Math.sin(a)*h.r*.35f,(4+i%3*2)*ui);}}}case PIT->{d.setColor(0xDD020202);d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);d.setColor(0xFF514A42);d.strokeWidth=2f*ui;d.strokeCircle(h.x,h.y,h.r*.75f);}case LAVA->{d.setColor(alpha(0xFFFF5625,warn));d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);d.setColor(0xFFFFC13B);for(int i=0;i<4;i++){float a=elapsed*(1+i*.12f)+i;d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);}}case FLOOD->{float p=Math.max(0,h.age-1.25f);d.setColor(alpha(0xFF4BAEE0,warn));float yy=h.y+(float)Math.sin(p*4f)*h.r*.14f;d.fillRoundRect(h.x-h.r,yy-h.r*.24f,h.x+h.r,yy+h.r*.24f,h.r*.18f);d.setColor(0x99DDF7FF);for(int i=0;i<5;i++){float xx=h.x-h.r+(i*.41f+(p*.9f)%1f)*h.r*2;d.fillCircle(xx,yy-h.r*.10f+(i%2)*h.r*.12f,2f*ui);}}}}
+    private void drawHazards(Draw d){
+        for(CaveHazard h:hazards){
+            float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;
+            switch(h.type){
+                case COLLAPSE -> {
+                    d.setColor(alpha(0xFFD57B4F,warn));
+                    d.strokeWidth=2f*ui;
+                    d.strokeCircle(h.x,h.y,h.r);
+                    if(h.age>=1.25f){
+                        d.setColor(0xFF50483F);
+                        for(int i=0;i<11;i++){
+                            float a=i*2.17f+h.cell*.31f;
+                            float rr=h.r*(.18f+.56f*hash01(h.cell*971L+i*71L));
+                            float sz=(4+i%4*2.1f)*ui;
+                            d.fillCircle(h.x+(float)Math.cos(a)*rr,h.y+(float)Math.sin(a)*rr*.55f,sz);
+                        }
+                        d.setColor(0xFF75695D);
+                        d.strokeWidth=2f*ui;
+                        d.line(h.x-h.r*.65f,h.y+h.r*.16f,h.x+h.r*.64f,h.y-h.r*.12f);
+                    }
+                }
+                case PIT -> {
+                    d.setColor(0xDD020202);
+                    d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);
+                    d.setColor(0xFF514A42);
+                    d.strokeWidth=2f*ui;
+                    d.strokeCircle(h.x,h.y,h.r*.75f);
+                }
+                case LAVA -> {
+                    d.setColor(alpha(0xFFFF5625,warn));
+                    d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);
+                    d.setColor(0xFFFFC13B);
+                    for(int i=0;i<4;i++){
+                        float a=elapsed*(1+i*.12f)+i;
+                        d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);
+                    }
+                }
+                case FLOOD -> {
+                    float q=Math.max(0,h.age-1.25f);
+                    d.setColor(alpha(0xFF4BAEE0,warn));
+                    float yy=h.y+(float)Math.sin(q*4f)*h.r*.14f;
+                    d.fillRoundRect(h.x-h.r,yy-h.r*.24f,h.x+h.r,yy+h.r*.24f,h.r*.18f);
+                    d.setColor(0x99DDF7FF);
+                    for(int i=0;i<5;i++){
+                        float xx=h.x-h.r+(i*.41f+(q*.9f)%1f)*h.r*2;
+                        d.fillCircle(xx,yy-h.r*.10f+(i%2)*h.r*.12f,2f*ui);
+                    }
+                }
+            }
+        }
     }
 
     private void drawFx(Draw d,Fx p){float a=Math.max(0,p.life/p.maxLife);d.setColor(alpha(p.color,a));if(p.spark){d.strokeWidth=Math.max(1f,p.size*.6f);d.line(p.x,p.y,p.x-p.vx*.025f,p.y-p.vy*.025f);}else d.fillCircle(p.x,p.y,p.size*(.45f+.55f*a));}
@@ -586,6 +689,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void drawToast(Draw d){if(toastTime<=0)return;float a=Math.min(1,toastTime*2);float w=Math.min(width-40f*ui,280f*ui);d.setColor(alpha(0xDD101316,a));d.fillRoundRect((width-w)/2,worldT+10f*ui,(width+w)/2,worldT+42f*ui,9f*ui);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=9.5f*ui;d.setColor(alpha(0xFFF2F4F5,a));d.text(toast,width/2,worldT+30f*ui);d.align=Draw.Align.LEFT;d.bold=false;}
 
     private boolean handleTap(float x,float y){
+        game.audio.play(GameAudio.Sfx.UI,.45f);
         if(back.hit(x,y)){saveNow();game.openMenu();return true;}
         for(int i=0;i<tabs.length;i++)if(tabs[i].hit(x,y)){tab=Tab.values()[i];return true;}
         if(left.hit(x,y)){switch(tab){case GNOMES->selectedTier=Math.max(0,selectedTier-1);case ARTIFACTS->selectedArtifact=Math.max(0,selectedArtifact-1);case RUNES->selectedRune=Math.max(0,selectedRune-1);default->{}}return true;}
@@ -596,6 +700,22 @@ public final class CaveScreen extends ScreenAdapter {
         if(quaternary.hit(x,y)){switch(tab){case UPGRADES->{if(state.buyOrUpgradeGuardian())toast="СТРАЖ СУНДУКА • ур."+state.guardianLevel;else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.3f;}case RUNES->{if(state.engraveRune(runeTarget,selectedRune))toast=state.runeAtTarget(runeTarget)==selectedRune?"РУНА НАНЕСЕНА":"РУНА СНЯТА";else toast="РУНА ЕЩЁ НЕ СОЗДАНА";toastTime=1.3f;}default->{}}saveNow();return true;}
         return true;
     }
+
+    private boolean handleWorldTap(float x,float y){
+        Vein best=null;float bd=Float.MAX_VALUE;
+        for(Vein v:veins){if(v.dead)continue;float q=dist2(x,y,v.x,v.y);if(q<bd){bd=q;best=v;}}
+        float pickRadius=Math.min(cellW,cellH)*.80f;
+        if(best!=null&&bd<=pickRadius*pickRadius){
+            priorityVein=best;
+            for(Worker w:workers){w.vein=best;w.mob=null;w.goalCell=-1;w.path=new int[0];w.pathIndex=0;}
+            toast="ПРИОРИТЕТ • "+best.type.title.toUpperCase();toastTime=1.5f;
+            game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);
+        }else{
+            priorityVein=null;invalidateRoutes();toast="ПРИОРИТЕТ СНЯТ";toastTime=1.0f;game.audio.play(GameAudio.Sfx.UI,.4f);
+        }
+        return true;
+    }
+
     private void buyGlobal(int kind){if(state.buyGlobalUpgrade(kind)){toast="УЛУЧШЕНИЕ КУПЛЕНО";}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}
 
     private void routeMob(Mob m,int goal){m.goalCell=goal;m.path=map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);}

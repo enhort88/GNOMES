@@ -24,6 +24,7 @@ public final class CaveMap {
     public final long seed;
 
     private final Random random;
+    private final boolean[] blocked;
 
     public CaveMap(int cols, int rows, long seed) {
         this.cols = Math.max(5, cols | 1);
@@ -31,6 +32,7 @@ public final class CaveMap {
         this.seed = seed;
         this.random = new Random(seed);
         this.openings = new int[this.rows][this.cols];
+        this.blocked = new boolean[this.rows * this.cols];
         this.startCol = this.cols / 2;
         this.startRow = this.rows - 1;
         generate();
@@ -88,6 +90,20 @@ public final class CaveMap {
         return inside(c, r) && (openings[r][c] & dir) != 0;
     }
 
+    public boolean blockCell(int cell) {
+        if (cell < 0 || cell >= blocked.length || cell == index(startCol, startRow)) return false;
+        blocked[cell] = true;
+        return true;
+    }
+
+    public void unblockCell(int cell) {
+        if (cell >= 0 && cell < blocked.length) blocked[cell] = false;
+    }
+
+    public boolean isBlocked(int cell) {
+        return cell >= 0 && cell < blocked.length && blocked[cell];
+    }
+
     public int degree(int c, int r) {
         return Integer.bitCount(openings[r][c]);
     }
@@ -121,6 +137,7 @@ public final class CaveMap {
     public int[] path(int start, int goal) {
         int count = cols * rows;
         if (start < 0 || start >= count || goal < 0 || goal >= count) return new int[0];
+        if (isBlocked(goal) && goal != start) return new int[0];
         if (start == goal) return new int[] { start };
 
         int[] parent = new int[count];
@@ -137,6 +154,7 @@ public final class CaveMap {
                 int nc = c + dx(dir), nr = r + dy(dir);
                 if (!inside(nc, nr)) continue;
                 int next = index(nc, nr);
+                if (next != start && isBlocked(next)) continue;
                 if (parent[next] != -2) continue;
                 parent[next] = cur;
                 if (next == goal) return reconstruct(parent, goal);
