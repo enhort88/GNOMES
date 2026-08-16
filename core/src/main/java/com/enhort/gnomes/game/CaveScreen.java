@@ -29,6 +29,7 @@ import java.util.Random;
  */
 public final class CaveScreen extends ScreenAdapter {
     private enum WorkerAction { IDLE, WALK, CARRY, MINE, FIGHT, STUNNED }
+    private enum PriorityKind { NONE, VEIN, MOB, POINT }
     private enum Tab { GNOMES, UPGRADES, ARTIFACTS, RUNES }
 
     private static final class Box {
@@ -44,7 +45,7 @@ public final class CaveScreen extends ScreenAdapter {
         final int visualId;
         GnomeTier tier;
         float x,y,vx,vy;
-        float phase, walkCycle, swing, attackCooldown, stun;
+        float phase, walkCycle, swing, attackCooldown, stun, routeRetry;
         boolean hitApplied;
         WorkerAction action=WorkerAction.IDLE;
         int[] path=new int[0];
@@ -107,8 +108,12 @@ public final class CaveScreen extends ScreenAdapter {
     private float worldL,worldT,worldR,worldB,cellW,cellH;
     private float elapsed,enemyTimer=13f,hazardTimer=18f,saveTimer,levelClearTimer=-1f,screenShake;
     private boolean speedHeld;
+    private PriorityKind priorityKind=PriorityKind.NONE;
     private Vein priorityVein;
-    private float priorityPulse;
+    private Mob priorityMob;
+    private int priorityCell=-1;
+    private float priorityX,priorityY,priorityPulse;
+    private boolean objectiveReminderShown;
     private Tab tab=Tab.GNOMES;
     private int selectedTier,selectedArtifact,selectedRune,runeTarget;
     private int nextWorkerId=1;
@@ -184,7 +189,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void generateDepth(boolean advance){
         if(width<=0||height<=0)return;
         if(advance){state.depth++;state.depthProgress=0;saveNow();}
-        mobs.clear();hazards.clear();fx.clear();veins.clear();priorityVein=null;
+        mobs.clear();hazards.clear();fx.clear();veins.clear();clearPriority(false);objectiveReminderShown=false;
         int cols=9;
         int rows=Math.max(9,Math.min(13,Math.round((worldB-worldT)/(width/cols))));
         long seed=0x9E3779B97F4A7C15L^(long)slot*0xBF58476D1CE4E5B9L^(long)state.depth*0x94D049BB133111EBL;
@@ -278,7 +283,13 @@ public final class CaveScreen extends ScreenAdapter {
         if(hazardTimer<=0){spawnHazard();hazardTimer=20f+random.nextFloat()*18f;}
         if(saveTimer>=4f){saveNow();saveTimer=0;}
         boolean any=false;for(Vein v:veins)if(!v.dead){any=true;break;}
-        if(!any&&levelClearTimer<0){levelClearTimer=1.4f;toast="УРОВЕНЬ ОЧИЩЕН";toastTime=1.4f;}
+        if(!any&&levelClearTimer<0){
+            if(levelObjectiveMet()){
+                levelClearTimer=1.4f;toast="УРОВЕНЬ ПРОЙДЕН";toastTime=1.4f;
+            }else if(!objectiveReminderShown){
+                objectiveReminderShown=true;toast=levelObjectiveToast();toastTime=2.4f;
+            }
+        }
         if(levelClearTimer>=0){levelClearTimer-=dt;if(levelClearTimer<=0)generateDepth(true);}
     }
 
@@ -302,20 +313,56 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void updateWorkers(float dt){
-        for(Worker w:new ArrayList<>(workers)){
-            w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;
+        int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
+        for(int i=workers.size()-1;i>=0;i--){
+            Worker w=workers.get(i);
+            w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;if(w.routeRetry>0)w.routeRetry-=dt;
             if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
-            if(priorityVein!=null&&!priorityVein.dead){
+
+            if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){
                 w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;
             }
-            Mob enemy=nearestMob(w.x,w.y);
-            if(enemy!=null){w.mob=enemy;w.vein=null;fight(w,enemy,dt);continue;}
+            if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){
+                w.vein=null;w.mob=priorityMob;fight(w,priorityMob,dt);continue;
+            }
+            if(priorityKind==PriorityKind.POINT&&priorityCell>=0){
+                w.vein=null;w.mob=null;moveToPriorityPoint(w,dt);continue;
+            }
+
+            Mob enemy=null;
+            if(defendersLeft>0)enemy=nearestMob(w.x,w.y);
+            if(enemy!=null){defendersLeft--;w.mob=enemy;w.vein=null;fight(w,enemy,dt);continue;}
+
             w.mob=null;
             float cap=w.tier.cargoCapacity*state.carryMultiplier(w.tier.ordinal());
             if(w.hasCargo()&&w.cargo()>=cap*.92){carryHome(w,dt);continue;}
-            if(w.vein==null||w.vein.dead)w.vein=chooseVein(w);
+            if(w.vein==null||w.vein.dead||map.isBlocked(w.vein.cell))w.vein=chooseVein(w);
             if(w.vein!=null)mine(w,w.vein,dt); else if(w.hasCargo())carryHome(w,dt); else {w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
         }
+    }
+
+    private int guardianDefenderQuota(){
+        if(workers.isEmpty())return 0;
+        float fraction=.18f/(1f+state.guardianLevel*.22f);
+        return Math.max(1,Math.min(12,(int)Math.ceil(workers.size()*fraction)));
+    }
+
+    private void moveToPriorityPoint(Worker w,float dt){
+        if(!atCell(w,priorityCell)){
+            w.action=WorkerAction.WALK;routeWorker(w,priorityCell);followWorker(w,moveSpeed(w),dt);return;
+        }
+        float a=w.visualId*2.3999632f;
+        float spread=Math.min(cellW,cellH)*(.035f+.055f*((w.visualId%7)/6f));
+        float tx=priorityX+(float)Math.cos(a)*spread,ty=priorityY+(float)Math.sin(a)*spread;
+        w.action=WorkerAction.WALK;moveDirect(w,tx,ty,moveSpeed(w),dt);
+        if(distance(w.x,w.y,tx,ty)<2.5f*ui){w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
+    }
+
+    private void moveDirect(Worker w,float tx,float ty,float speed,float dt){
+        float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
+        if(di<.001f){w.vx=w.vy=0;return;}
+        float step=Math.min(di,speed*dt),nx=dx/di,ny=dy/di;
+        w.vx=nx*speed;w.vy=ny*speed;w.x+=nx*step;w.y+=ny*step;w.walkCycle+=step/(5f*ui);
     }
 
     private void mine(Worker w,Vein v,float dt){
@@ -363,16 +410,27 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private float moveSpeed(Worker w){return w.tier.moveSpeed*state.speedMultiplier(w.tier.ordinal())*ui;}
-    private void routeWorker(Worker w,int goal){if(w.goalCell==goal&&w.path.length>0)return;w.goalCell=goal;w.path=map.path(cellFor(w.x,w.y),goal);w.pathIndex=Math.min(1,w.path.length);}
+    private void routeWorker(Worker w,int goal){
+        if(w.goalCell==goal&&w.path.length>0)return;
+        if(w.goalCell==goal&&w.routeRetry>0)return;
+        w.goalCell=goal;w.path=map.path(cellFor(w.x,w.y),goal);w.pathIndex=Math.min(1,w.path.length);
+        w.routeRetry=w.path.length==0?.28f:0f;
+    }
     private void followWorker(Worker w,float speed,float dt){
         if(w.path.length==0||w.pathIndex>=w.path.length){w.vx=w.vy=0;return;}
-        int node=w.path[w.pathIndex];float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
-        if(di<2.5f*ui){w.x=tx;w.y=ty;w.pathIndex++;if(w.pathIndex>=w.path.length){w.vx=w.vy=0;return;}node=w.path[w.pathIndex];tx=cx(map.col(node));ty=cy(map.row(node));dx=tx-w.x;dy=ty-w.y;di=len(dx,dy);}
-        if(di>.001f){w.vx=dx/di*speed;w.vy=dy/di*speed;w.x+=w.vx*dt;w.y+=w.vy*dt;w.walkCycle+=dt*(7.5f+speed/(38f*ui));}
+        float remaining=Math.max(0,speed*dt),moved=0;int guard=0;float lastNx=0,lastNy=0;
+        while(remaining>.001f&&w.pathIndex<w.path.length&&guard++<20){
+            int node=w.path[w.pathIndex];float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
+            if(di<.001f){w.x=tx;w.y=ty;w.pathIndex++;continue;}
+            float nx=dx/di,ny=dy/di;lastNx=nx;lastNy=ny;
+            if(di<=remaining){w.x=tx;w.y=ty;w.pathIndex++;remaining-=di;moved+=di;}
+            else{w.x+=nx*remaining;w.y+=ny*remaining;moved+=remaining;remaining=0;}
+        }
+        if(moved>0){w.vx=lastNx*speed;w.vy=lastNy*speed;w.walkCycle+=moved/(5f*ui);}else w.vx=w.vy=0;
+        if(w.pathIndex>=w.path.length){w.vx=w.vy=0;}
     }
 
-    private Vein chooseVein(Worker w){if(priorityVein!=null&&!priorityVein.dead)return priorityVein;Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead||map.isBlocked(v.cell))continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}
-
+    private Vein chooseVein(Worker w){Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead||map.isBlocked(v.cell))continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}
     private void updateMobs(float dt){
         List<Mob> summons=new ArrayList<>();
         for(Mob m:mobs){
@@ -405,21 +463,31 @@ public final class CaveScreen extends ScreenAdapter {
 
     private void robChest(Mob m){
         if(m.attackCooldown>0)return;m.attackCooldown=m.type==EnemyType.IMP_KING?1.7f:2.5f;m.attack=.42f;
-        long before=state.stone+state.silver*8+state.gold*20+state.diamond*100;
-        state.stealFromChest(state.depth,m.type==EnemyType.IMP_KING);
-        long after=state.stone+state.silver*8+state.gold*20+state.diamond*100;
-        if(before>after){toast="БЕС В СУНДУКЕ  −"+format(before-after);toastTime=1.5f;spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFC04A,10);game.audio.play(GameAudio.Sfx.COIN,.65f);game.audio.vibrate(40);}
-        // A thief visibly retreats after every grab instead of becoming a stationary resource vacuum.
-        List<Integer> outer=map.outerCells();int goal=outer.get(random.nextInt(outer.size()));m.goalCell=goal;m.path=map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=1.2f;
+        long[] stolen=state.stealFromChest(state.depth,m.type==EnemyType.IMP_KING);
+        long value=stolen[0]+stolen[1]*8L+stolen[2]*20L+stolen[3]*100L;
+        if(value>0){toast=lootToast(stolen);toastTime=1.7f;spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFC04A,8);game.audio.play(GameAudio.Sfx.COIN,.65f);game.audio.vibrate(40);}
+    }
+
+    private String lootToast(long[] s){
+        StringBuilder b=new StringBuilder("БЕС УКРАЛ: ");
+        if(s[0]>0)b.append("кам ").append(s[0]).append(' ');
+        if(s[1]>0)b.append("Ag ").append(s[1]).append(' ');
+        if(s[2]>0)b.append("Au ").append(s[2]).append(' ');
+        if(s[3]>0)b.append("◆ ").append(s[3]);
+        return b.toString().trim();
     }
 
     private void attackWorker(Mob m,Worker w){
-        if(w==null||m.attackCooldown>0)return;m.attackCooldown=1.0f;m.attack=.40f;w.stun=Math.max(w.stun,.38f+m.type.contactPower*.025f);spawnSparks(w.x,w.y,0xFFFF765D,5);
-        if(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()&&random.nextFloat()<.025f*(1-state.hazardSurvivalBonus(w.tier.ordinal())))loseWorker(w,m.type.title+" сбил гнома");
+        if(w==null||m.attackCooldown>0||m.type==EnemyType.IMP||m.type==EnemyType.IMP_KING)return;
+        m.attackCooldown=1.0f;m.attack=.40f;w.stun=Math.max(w.stun,.38f+m.type.contactPower*.025f);spawnSparks(w.x,w.y,0xFFFF765D,4);
+        float survive=state.hazardSurvivalBonus(w.tier.ordinal());
+        float lethality=Math.min(.34f,.008f+m.type.contactPower*.006f);
+        if(m.type==EnemyType.DEMON_KING||m.type==EnemyType.ELEMENTAL_KING)lethality=Math.min(.45f,lethality*1.45f);
+        if(random.nextFloat()<lethality*(1-survive))loseWorker(w,m.type.title+" убил гнома");
     }
-
     private void killMob(Mob m){
         if(m.dead)return;m.dead=true;m.attack=-2f;state.enemiesDefeated++;spawnDeath(m);screenShake=Math.max(screenShake,2.2f*ui);
+        if(priorityKind==PriorityKind.MOB&&priorityMob==m){clearPriority(false);toast="ЦЕЛЬ УНИЧТОЖЕНА";toastTime=1.2f;}
         if(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()){int rune=state.grantRandomRuneLevel(random);toast="БОСС ПОВЕРЖЕН • "+RuneType.values()[rune].title;toastTime=2.4f;}
     }
 
@@ -451,8 +519,17 @@ public final class CaveScreen extends ScreenAdapter {
         screenShake=Math.max(screenShake,h.type==HazardType.COLLAPSE?5f*ui:2f*ui);
         if(h.type==HazardType.COLLAPSE&&map.blockCell(h.cell)){h.obstacleActive=true;invalidateRoutes();game.audio.play(GameAudio.Sfx.COLLAPSE,.92f);game.audio.vibrate(120);}
         else {game.audio.play(GameAudio.Sfx.HAZARD,.62f);game.audio.vibrate(45);}
-        for(Worker w:new ArrayList<>(workers)){float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;float survive=state.hazardSurvivalBonus(w.tier.ordinal());switch(h.type){case FLOOD->w.stun=Math.max(w.stun,1.4f);case LAVA-> {w.stun=Math.max(w.stun,.7f);if(random.nextFloat()<.10f*(1-survive))loseWorker(w,"лава");}case PIT-> {if(random.nextFloat()<.12f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1f);}case COLLAPSE-> {if(random.nextFloat()<.16f*(1-survive))loseWorker(w,"попал под обвал");else w.stun=Math.max(w.stun,.9f);}}}
-        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,14);
+        for(Worker w:new ArrayList<>(workers)){
+            float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;
+            float survive=state.hazardSurvivalBonus(w.tier.ordinal());
+            switch(h.type){
+                case FLOOD -> w.stun=Math.max(w.stun,1.8f);
+                case LAVA -> {w.stun=Math.max(w.stun,.8f);if(random.nextFloat()<.20f*(1-survive))loseWorker(w,"сгорел в лаве");}
+                case PIT -> {if(random.nextFloat()<.24f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1.2f);}
+                case COLLAPSE -> {if(random.nextFloat()<.28f*(1-survive))loseWorker(w,"погиб под обвалом");else w.stun=Math.max(w.stun,1.1f);}
+            }
+        }
+        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,10);
     }
 
     private void invalidateRoutes(){
@@ -460,19 +537,22 @@ public final class CaveScreen extends ScreenAdapter {
         for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}
     }
 
-    private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}if(fx.size()>420)fx.subList(0,fx.size()-420).clear();}
-    private void spawnRockHit(Vein v,int power){for(int i=0;i<5+Math.min(5,power);i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-.2f*s,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
+    private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}int limit=workers.size()>120?170:workers.size()>70?230:420;if(fx.size()>limit)fx.subList(0,fx.size()-limit).clear();}
+    private void spawnRockHit(Vein v,int power){int n=workers.size()>120?1:workers.size()>70?2:5+Math.min(5,power);for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-.2f*s,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
     private void spawnBreak(Vein v){for(int i=0;i<22;i++){float a=random.nextFloat()*6.28f,s=(30+random.nextFloat()*110)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-35f*ui,.45f+random.nextFloat()*.65f,(1.5f+random.nextFloat()*3.4f)*ui,adjust(v.type.color,.65f+random.nextFloat()*.5f),false));}}
     private void spawnDeath(Mob m){for(int i=0;i<18+(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()?16:0);i++){float a=random.nextFloat()*6.28f,s=(35+random.nextFloat()*95)*ui;fx.add(new Fx(m.x,m.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s,.45f+random.nextFloat()*.5f,(1.5f+random.nextFloat()*3f)*ui,m.type.color,false));}}
     private void spawnSparks(float x,float y,int color,int n){for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*85)*ui;fx.add(new Fx(x,y,(float)Math.cos(a)*s,(float)Math.sin(a)*s,.18f+random.nextFloat()*.3f,(1+random.nextFloat()*1.7f)*ui,color,true));}}
 
     private void drawWorld(Draw d){
         d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawHazards(d);drawVeins(d);drawChest(d);
-        List<Object> actors=new ArrayList<>();actors.addAll(workers);actors.addAll(mobs);actors.sort(Comparator.comparingDouble(o->o instanceof Worker?wY((Worker)o):((Mob)o).y));
-        for(Object o:actors){if(o instanceof Worker)drawWorker(d,(Worker)o);else drawMob(d,(Mob)o);}
+        for(int row=0;row<map.rows;row++){
+            for(Worker w:workers)if(rowForY(w.y)==row)drawWorker(d,w);
+            for(Mob m:mobs)if(rowForY(m.y)==row)drawMob(d,m);
+        }
+        drawPriorityOverlay(d);
         for(Fx p:fx)drawFx(d,p);drawAtmosphere(d);
     }
-    private float wY(Worker w){return w.y;}
+    private int rowForY(float y){return Math.max(0,Math.min(map.rows-1,(int)((y-worldT)/cellH)));}
 
     private void drawRockMass(Draw d){
         d.setColor(0xFF11100E);d.fillRect(worldL,worldT,worldR,worldB);
@@ -496,8 +576,16 @@ public final class CaveScreen extends ScreenAdapter {
         float flick=.82f+.18f*(float)Math.sin(elapsed*9.3f+seed);d.setColor(0x18FF9B32);d.fillCircle(x,y,25f*ui*flick);d.setColor(0x28FFB14A);d.fillCircle(x,y,13f*ui*flick);d.setColor(0xFF6E4930);d.strokeWidth=2.3f*ui;d.line(x,y+9f*ui,x,y+18f*ui);d.setColor(0xFFFF8C2E);d.fillOval(x-3.4f*ui,y-7f*ui,x+3.4f*ui,y+4f*ui);d.setColor(0xFFFFD36A);d.fillOval(x-1.5f*ui,y-4.5f*ui,x+1.5f*ui,y+1f*ui);
     }
 
-    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}
+    private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(priorityKind==PriorityKind.VEIN&&v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}
     private void drawPriorityMarker(Draw d,Vein v){float p=.5f+.5f*(float)Math.sin(priorityPulse*6f);float rr=v.r*(1.35f+.10f*p);d.setColor(0x66FFD35A);d.strokeWidth=(1.4f+p*1.2f)*ui;d.strokeCircle(v.x,v.y,rr);d.setColor(0xCCFFD35A);d.pathReset();d.moveTo(v.x,v.y-v.r*1.65f);d.lineTo(v.x-v.r*.22f,v.y-v.r*1.35f);d.lineTo(v.x+v.r*.22f,v.y-v.r*1.35f);d.closePath();d.fillPath();}
+    private void drawPriorityOverlay(Draw d){
+        if(priorityKind==PriorityKind.NONE)return;
+        float p=.5f+.5f*(float)Math.sin(priorityPulse*6f),x=priorityX,y=priorityY,r=13f*ui+p*3f*ui;
+        if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){x=priorityMob.x;y=priorityMob.y;r=priorityMob.type.size*ui*(.78f+.08f*p);}
+        if(priorityKind==PriorityKind.VEIN)return;
+        d.setColor(priorityKind==PriorityKind.MOB?0xAAFF6654:0xAAFFD35A);d.strokeWidth=(1.5f+p)*ui;d.strokeCircle(x,y,r);
+        d.line(x-r*1.25f,y,x-r*.55f,y);d.line(x+r*.55f,y,x+r*1.25f,y);d.line(x,y-r*1.25f,x,y-r*.55f);d.line(x,y+r*.55f,x,y+r*1.25f);
+    }
     private void drawVein(Draw d,Vein v){
         float death=v.dead?Math.max(0,1-v.death/.55f):1;float damage=1-Math.max(0,v.hp)/v.maxHp;float shake=v.hitFlash>0?(float)Math.sin(v.hitFlash*210f)*2.1f*ui*(v.hitFlash/.16f):0;
         d.save();d.translate(shake,0);d.scale(death,death);float x=v.x,y=v.y,r=v.r;
@@ -602,54 +690,51 @@ public final class CaveScreen extends ScreenAdapter {
 
     private void drawHazards(Draw d){
         for(CaveHazard h:hazards){
-            float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;
+            float warning=Math.min(1f,h.age/1.25f);
             switch(h.type){
-                case COLLAPSE -> {
-                    d.setColor(alpha(0xFFD57B4F,warn));
-                    d.strokeWidth=2f*ui;
-                    d.strokeCircle(h.x,h.y,h.r);
-                    if(h.age>=1.25f){
-                        d.setColor(0xFF50483F);
-                        for(int i=0;i<11;i++){
-                            float a=i*2.17f+h.cell*.31f;
-                            float rr=h.r*(.18f+.56f*hash01(h.cell*971L+i*71L));
-                            float sz=(4+i%4*2.1f)*ui;
-                            d.fillCircle(h.x+(float)Math.cos(a)*rr,h.y+(float)Math.sin(a)*rr*.55f,sz);
-                        }
-                        d.setColor(0xFF75695D);
-                        d.strokeWidth=2f*ui;
-                        d.line(h.x-h.r*.65f,h.y+h.r*.16f,h.x+h.r*.64f,h.y-h.r*.12f);
-                    }
-                }
-                case PIT -> {
-                    d.setColor(0xDD020202);
-                    d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);
-                    d.setColor(0xFF514A42);
-                    d.strokeWidth=2f*ui;
-                    d.strokeCircle(h.x,h.y,h.r*.75f);
-                }
-                case LAVA -> {
-                    d.setColor(alpha(0xFFFF5625,warn));
-                    d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);
-                    d.setColor(0xFFFFC13B);
-                    for(int i=0;i<4;i++){
-                        float a=elapsed*(1+i*.12f)+i;
-                        d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);
-                    }
-                }
-                case FLOOD -> {
-                    float q=Math.max(0,h.age-1.25f);
-                    d.setColor(alpha(0xFF4BAEE0,warn));
-                    float yy=h.y+(float)Math.sin(q*4f)*h.r*.14f;
-                    d.fillRoundRect(h.x-h.r,yy-h.r*.24f,h.x+h.r,yy+h.r*.24f,h.r*.18f);
-                    d.setColor(0x99DDF7FF);
-                    for(int i=0;i<5;i++){
-                        float xx=h.x-h.r+(i*.41f+(q*.9f)%1f)*h.r*2;
-                        d.fillCircle(xx,yy-h.r*.10f+(i%2)*h.r*.12f,2f*ui);
-                    }
-                }
+                case COLLAPSE -> drawCollapseHazard(d,h,warning);
+                case FLOOD -> drawFloodHazard(d,h,warning);
+                case PIT -> {d.setColor(0xDD020202);d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);d.setColor(0xFF514A42);d.strokeWidth=2f*ui;d.strokeCircle(h.x,h.y,h.r*.75f);}
+                case LAVA -> {float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;d.setColor(alpha(0xFFFF5625,warn));d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);d.setColor(0xFFFFC13B);for(int i=0;i<4;i++){float a=elapsed*(1+i*.12f)+i;d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);}}
             }
         }
+    }
+
+    private void drawCollapseHazard(Draw d,CaveHazard h,float warning){
+        float pulse=.45f+.35f*(float)Math.sin(h.age*15f);
+        if(h.age<1.25f){
+            d.setColor(alpha(0xFFE0A06C,.35f+.35f*warning));d.strokeWidth=(1.2f+warning*1.4f)*ui;
+            for(int i=0;i<5;i++){float ox=(i-2)*h.r*.20f;d.line(h.x+ox,h.y-h.r*.82f,h.x+ox*.55f,h.y-h.r*(.18f+.08f*(i%2)));}
+            d.setColor(alpha(0xFFB7A18A,.30f+.35f*pulse));for(int i=0;i<8;i++){float x=h.x-h.r*.58f+hash01(h.cell*911L+i*73L)*h.r*1.16f;float y=h.y-h.r*.70f+((h.age*32f+i*11)%32)*ui;d.fillCircle(x,y,(1.2f+i%3*.7f)*ui);}
+            return;
+        }
+        float settle=Math.min(1f,(h.age-1.25f)/.55f);
+        d.setColor(0xAA171411);d.fillOval(h.x-h.r*.88f,h.y-h.r*.10f,h.x+h.r*.88f,h.y+h.r*.48f);
+        for(int i=0;i<17;i++){
+            float q=hash01(h.cell*971L+i*71L),a=i*2.17f+h.cell*.31f;float rr=h.r*(.10f+.72f*q),sz=(4.5f+i%5*1.8f)*ui*settle;
+            float x=h.x+(float)Math.cos(a)*rr,y=h.y+h.r*.12f+(float)Math.sin(a)*rr*.26f;
+            d.setColor(i%3==0?0xFF75695D:i%3==1?0xFF4E4841:0xFF62584E);d.fillCircle(x,y,sz);
+            if(i%4==0){d.setColor(0xFF9A8A78);d.strokeWidth=1.2f*ui;d.line(x-sz*.7f,y-sz*.2f,x+sz*.6f,y+sz*.25f);}
+        }
+        d.setColor(0x668F8173);for(int i=0;i<7;i++){float drift=(h.age*13f+i*17f)%38f;d.fillCircle(h.x+(i-3)*h.r*.15f,h.y-h.r*.10f-drift*ui,(2f+i%3)*ui*(1-Math.min(.85f,(h.age-1.25f)/10f)));}
+    }
+
+    private void drawFloodHazard(Draw d,CaveHazard h,float warning){
+        float t=Math.max(0,h.age-1.25f),dir=(h.cell&1)==0?1f:-1f;
+        if(h.age<1.25f){
+            d.setColor(alpha(0xFF68C8EE,.22f+.38f*warning));d.strokeWidth=(2f+warning*3f)*ui;
+            for(int i=0;i<3;i++){float yy=h.y+(i-1)*h.r*.16f;d.line(h.x-dir*h.r*.72f,yy,h.x+dir*h.r*.72f,yy+(float)Math.sin(h.age*9+i)*h.r*.08f);}
+            return;
+        }
+        float width=h.r*1.10f;
+        d.setColor(0x55399CCB);d.strokeWidth=h.r*.32f;
+        for(int j=0;j<3;j++){
+            float yy=h.y+(j-1)*h.r*.13f;
+            for(int i=0;i<8;i++){float x1=h.x-width+i*(width*2/8f),x2=h.x-width+(i+1)*(width*2/8f);float wave1=(float)Math.sin((i+j*2)*1.4f+t*8f*dir)*h.r*.07f;float wave2=(float)Math.sin((i+1+j*2)*1.4f+t*8f*dir)*h.r*.07f;d.line(x1,yy+wave1,x2,yy+wave2);}
+        }
+        d.setColor(0xBBDDF8FF);d.strokeWidth=1.5f*ui;
+        for(int i=0;i<10;i++){float f=(i*.137f+t*.55f)%1f;float x=h.x-dir*width+dir*f*width*2;float y=h.y-h.r*.24f+(float)Math.sin(i*2.1f+t*7f)*h.r*.12f;d.fillCircle(x,y,(1.3f+i%3*.8f)*ui);}
+        d.setColor(0x446AD6F2);for(int i=0;i<6;i++){float f=(i*.21f+t*.9f)%1f;float x=h.x-dir*width+dir*f*width*2;d.fillOval(x-3f*ui,h.y-h.r*.42f,x+3f*ui,h.y+h.r*.30f);}
     }
 
     private void drawFx(Draw d,Fx p){float a=Math.max(0,p.life/p.maxLife);d.setColor(alpha(p.color,a));if(p.spark){d.strokeWidth=Math.max(1f,p.size*.6f);d.line(p.x,p.y,p.x-p.vx*.025f,p.y-p.vy*.025f);}else d.fillCircle(p.x,p.y,p.size*(.45f+.55f*a));}
@@ -664,6 +749,7 @@ public final class CaveScreen extends ScreenAdapter {
         button(d,back,"‹",true,1.20f);
         d.align=Draw.Align.LEFT;d.bold=true;d.textSize=13f*ui;d.setColor(0xFFF2EFE7);d.text("GNOMES",58f*ui,23f*ui);
         d.bold=false;d.textSize=8.7f*ui;d.setColor(UiTheme.GOLD);d.text("ГЛУБИНА "+state.depth,58f*ui,42f*ui);
+        d.align=Draw.Align.CENTER;d.textSize=7.2f*ui;d.setColor(levelObjectiveMet()?0xFF79C98A:0xFFE2B544);d.text(levelObjectiveShort(),width*.72f,42f*ui);d.align=Draw.Align.LEFT;
         float y=65f*ui,section=width/4f;
         drawResource(d,7f*ui,y,0xFF888D92,"●",state.stone);
         drawResource(d,section+5f*ui,y,0xFFC6D0D8,"Ag",state.silver);
@@ -701,25 +787,37 @@ public final class CaveScreen extends ScreenAdapter {
         if(right.hit(x,y)){switch(tab){case GNOMES->selectedTier=Math.min(GnomeTier.values().length-1,selectedTier+1);case ARTIFACTS->selectedArtifact=Math.min(ArtifactType.values().length-1,selectedArtifact+1);case RUNES->selectedRune=Math.min(RuneType.values().length-1,selectedRune+1);default->{}}return true;}
         if(primary.hit(x,y)){switch(tab){case GNOMES->{if(selectedTier==0&&state.buyMiner()){syncWorkers(false);toast="НОВЫЙ ГНОМ";toastTime=1.2f;}else if(selectedTier>0)toast="ГНОМЫ ЭТОГО ТИПА ПОЛУЧАЮТСЯ СЛИЯНИЕМ";}case UPGRADES->buyGlobal(0);case ARTIFACTS->{if(state.upgradeArtifact(selectedArtifact)){toast="АРТЕФАКТ УСИЛЕН";}else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}case RUNES->{if(state.upgradeRune(selectedRune))toast="РУНА УСИЛЕНА";else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}}saveNow();return true;}
         if(secondary.hit(x,y)){switch(tab){case GNOMES->{if(state.upgradeTier(selectedTier))toast="ГНОМ УСИЛЕН";else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}case UPGRADES->buyGlobal(1);case RUNES->{runeTarget=(runeTarget+1)%state.runeTargetCount();}default->{}}saveNow();return true;}
-        if(tertiary.hit(x,y)){switch(tab){case GNOMES->{if(state.mergeTier(selectedTier)){syncWorkers(false);toast="ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.4f;}}case UPGRADES->buyGlobal(2);default->{}}saveNow();return true;}
+        if(tertiary.hit(x,y)){switch(tab){case GNOMES->{if(state.mergeTier(selectedTier)){syncWorkers(false);toast=state.depth==1&&levelObjectiveMet()?"ЦЕЛЬ ВЫПОЛНЕНА • ПРОДВИНУТЫЙ ГНОМ":"ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.6f;}}case UPGRADES->buyGlobal(2);default->{}}saveNow();return true;}
         if(quaternary.hit(x,y)){switch(tab){case UPGRADES->{if(state.buyOrUpgradeGuardian())toast="СТРАЖ СУНДУКА • ур."+state.guardianLevel;else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.3f;}case RUNES->{if(state.engraveRune(runeTarget,selectedRune))toast=state.runeAtTarget(runeTarget)==selectedRune?"РУНА НАНЕСЕНА":"РУНА СНЯТА";else toast="РУНА ЕЩЁ НЕ СОЗДАНА";toastTime=1.3f;}default->{}}saveNow();return true;}
         return true;
     }
 
     private boolean handleWorldTap(float x,float y){
+        Mob mob=null;float mobD=Float.MAX_VALUE;
+        for(Mob m:mobs){if(m.dead)continue;float q=dist2(x,y,m.x,m.y);float rr=Math.max(18f*ui,m.type.size*ui*.75f);if(q<=rr*rr&&q<mobD){mobD=q;mob=m;}}
+        if(mob!=null){
+            priorityKind=PriorityKind.MOB;priorityMob=mob;priorityVein=null;priorityCell=cellFor(mob.x,mob.y);priorityX=mob.x;priorityY=mob.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • АТАКОВАТЬ "+mob.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
+        }
+
         Vein best=null;float bd=Float.MAX_VALUE;
         for(Vein v:veins){if(v.dead)continue;float q=dist2(x,y,v.x,v.y);if(q<bd){bd=q;best=v;}}
         float pickRadius=Math.min(cellW,cellH)*.80f;
         if(best!=null&&bd<=pickRadius*pickRadius){
-            priorityVein=best;
-            for(Worker w:workers){w.vein=best;w.mob=null;w.goalCell=-1;w.path=new int[0];w.pathIndex=0;}
-            toast="ПРИОРИТЕТ • "+best.type.title.toUpperCase();toastTime=1.5f;
-            game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);
-        }else{
-            priorityVein=null;invalidateRoutes();toast="ПРИОРИТЕТ СНЯТ";toastTime=1.0f;game.audio.play(GameAudio.Sfx.UI,.4f);
+            priorityKind=PriorityKind.VEIN;priorityVein=best;priorityMob=null;priorityCell=best.cell;priorityX=best.x;priorityY=best.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • ДОБЫВАТЬ "+best.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
         }
+
+        priorityKind=PriorityKind.POINT;priorityVein=null;priorityMob=null;priorityCell=cellFor(x,y);priorityX=x;priorityY=y;resetWorkerRoutes();
+        toast="ПРИКАЗ • СОБРАТЬСЯ ЗДЕСЬ";toastTime=1.25f;game.audio.play(GameAudio.Sfx.UI,.60f);game.audio.vibrate(14);
         return true;
     }
+
+    private void resetWorkerRoutes(){for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;w.routeRetry=0;}}
+    private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
+    private boolean levelObjectiveMet(){return state.depth!=1||state.tierCounts[GnomeTier.VETERAN.ordinal()]>=1;}
+    private String levelObjectiveShort(){return state.depth==1?"ЦЕЛЬ: ПРОДВИНУТЫЙ "+Math.min(1,state.tierCounts[GnomeTier.VETERAN.ordinal()])+"/1":"ЦЕЛЬ: ОЧИСТИТЬ ЖИЛЫ";}
+    private String levelObjectiveToast(){return state.depth==1?"ЦЕЛЬ: СОЗДАЙТЕ 1 ПРОДВИНУТОГО ГНОМА":"ЦЕЛЬ УРОВНЯ НЕ ВЫПОЛНЕНА";}
 
     private void buyGlobal(int kind){if(state.buyGlobalUpgrade(kind)){toast="УЛУЧШЕНИЕ КУПЛЕНО";}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}
 

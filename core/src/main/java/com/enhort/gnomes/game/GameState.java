@@ -250,21 +250,13 @@ public class GameState {
     public long[] stealFromChest(int depth, boolean king) {
         long[] stolen = new long[4];
         float reduction = chestTheftReduction();
-        double power = (king ? 4.0 : 1.0) * (1.0 + depth * 0.09) * (1.0 - reduction);
+        double pct = (king ? 0.16 : 0.045) + Math.min(0.08, depth * (king ? 0.0025 : 0.0015));
+        pct = Math.max(0.005, pct * (1.0 - reduction));
 
-        long stoneWant = Math.max(1, Math.round(10 * power));
-        long silverWant = Math.round(1.6 * power);
-        long goldWant = Math.round(0.55 * power);
-        long diamondWant = king ? Math.round(0.16 * power) : 0;
-
-        stolen[0] = Math.min(stone, stoneWant);
-        stone -= stolen[0];
-        stolen[1] = Math.min(silver, silverWant);
-        silver -= stolen[1];
-        stolen[2] = Math.min(gold, goldWant);
-        gold -= stolen[2];
-        stolen[3] = Math.min(diamond, diamondWant);
-        diamond -= stolen[3];
+        if (stone > 0) { stolen[0] = Math.min(stone, Math.max(1, Math.round(stone * pct))); stone -= stolen[0]; }
+        if (silver > 0) { stolen[1] = Math.min(silver, Math.max(1, Math.round(silver * pct))); silver -= stolen[1]; }
+        if (gold > 0) { stolen[2] = Math.min(gold, Math.max(1, Math.round(gold * pct))); gold -= stolen[2]; }
+        if (diamond > 0) { stolen[3] = Math.min(diamond, Math.max(1, Math.round(diamond * pct))); diamond -= stolen[3]; }
 
         long value = stolen[0] + stolen[1] * 8L + stolen[2] * 20L + stolen[3] * 100L;
         stolenValue += value;
@@ -273,6 +265,7 @@ public class GameState {
 
     public long minerBuyCost() {
         if (FREE_SHOP) return 0;
+        if (depth == 1 && tierCounts[0] < 10) return Math.round(35 * Math.pow(1.10, tierCounts[0]));
         return Math.round(85 * Math.pow(1.27, tierCounts[0]));
     }
 
