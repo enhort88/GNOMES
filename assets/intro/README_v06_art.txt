@@ -1,0 +1,1 @@
+GNOMES v0.6 intro art is generated from the new dark-fantasy concept pass and replaces the earlier placeholder montage. Runtime images are committed as generated raster assets.
