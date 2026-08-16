@@ -391,7 +391,12 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private boolean followMob(Mob m,float speed,float dt){
-        if(m.path.length==0||m.pathIndex>=m.path.length)return true;
+        if(m.path.length==0)return false;
+        if(m.pathIndex>=m.path.length){
+            if(m.goalCell<0)return false;
+            float gx=cx(map.col(m.goalCell)),gy=cy(map.row(m.goalCell));
+            return distance(m.x,m.y,gx,gy)<Math.min(cellW,cellH)*.25f;
+        }
         int node=m.path[m.pathIndex];float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-m.x,dy=ty-m.y,di=len(dx,dy);
         if(di<2.5f*ui){m.x=tx;m.y=ty;m.pathIndex++;if(m.pathIndex>=m.path.length)return true;node=m.path[m.pathIndex];tx=cx(map.col(node));ty=cy(map.row(node));dx=tx-m.x;dy=ty-m.y;di=len(dx,dy);}
         if(di>.001f){m.x+=dx/di*speed*dt;m.y+=dy/di*speed*dt;m.walkCycle+=dt*(5.5f+m.type.moveSpeed/18f);}
