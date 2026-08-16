@@ -200,6 +200,39 @@ public final class CaveMap {
     /** Workers clearing a cave-in may enter the blocked goal cell, but cannot cross other rubble. */
     public int[] pathToBlockedGoal(int start, int goal) { return pathInternal(start, goal, false, true); }
 
+    /**
+     * Worker route around currently visible danger cells. This intentionally does not use the shared cache:
+     * hazards are short-lived and their mask changes independently of the cave revision.
+     */
+    public int[] pathAvoiding(int start, int goal, boolean[] avoid) {
+        int count = cols * rows;
+        if (start < 0 || start >= count || goal < 0 || goal >= count) return new int[0];
+        if (start == goal) return new int[] { start };
+        if (avoid != null && goal < avoid.length && avoid[goal]) return new int[0];
+        int[] parent = new int[count];
+        java.util.Arrays.fill(parent, -2);
+        ArrayDeque<Integer> q = new ArrayDeque<>();
+        parent[start] = -1;
+        q.add(start);
+        while (!q.isEmpty()) {
+            int cur = q.removeFirst();
+            int c = col(cur), r = row(cur), bits = openings[r][c];
+            for (int dir : DIRS) {
+                if ((bits & dir) == 0) continue;
+                int nc = c + dx(dir), nr = r + dy(dir);
+                if (!inside(nc, nr)) continue;
+                int next = index(nc, nr);
+                if (next != start && isBlocked(next)) continue;
+                if (next != goal && avoid != null && next < avoid.length && avoid[next]) continue;
+                if (parent[next] != -2) continue;
+                parent[next] = cur;
+                if (next == goal) return reconstruct(parent, goal);
+                q.addLast(next);
+            }
+        }
+        return new int[0];
+    }
+
     private int[] pathInternal(int start, int goal, boolean ignoreBlocks, boolean allowBlockedGoal) {
         int count = cols * rows;
         if (start < 0 || start >= count || goal < 0 || goal >= count) return new int[0];

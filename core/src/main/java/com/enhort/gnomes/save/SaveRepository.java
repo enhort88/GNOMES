@@ -5,23 +5,53 @@ import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.utils.Json;
 import com.enhort.gnomes.game.GameState;
 
-/** Five independent JSON save slots, mirroring the structure used by DOT//CORE. */
+/** Five independent expedition saves plus one account-wide rune profile. */
 public final class SaveRepository {
     public static final int SLOT_COUNT = 5;
     private static final String PREFS_NAME = "gnomes.saves.v3";
+    private static final String META_NAME = "gnomes.meta.v1";
 
     private final Preferences prefs = Gdx.app.getPreferences(PREFS_NAME);
+    private final Preferences meta = Gdx.app.getPreferences(META_NAME);
     private final Json json = new Json();
 
-    public boolean exists(int slot) {
-        return valid(slot) && prefs.contains(key(slot));
+    public SaveRepository() { migrateAllLegacyRuneProgress(); }
+
+    private void migrateAllLegacyRuneProgress() {
+        if (meta.getBoolean("initialized", false)) return;
+        int[] best = new int[com.enhort.gnomes.game.model.RuneType.values().length];
+        boolean[] active = new boolean[best.length];
+        for (int slot = 1; slot <= SLOT_COUNT; slot++) {
+            if (!prefs.contains(key(slot))) continue;
+            try {
+                Snapshot snap = json.fromJson(Snapshot.class, prefs.getString(key(slot)));
+                if (snap == null || snap.runeLevels == null) continue;
+                for (int i = 0; i < Math.min(best.length, snap.runeLevels.length); i++) {
+                    if (snap.runeLevels[i] > best[i]) best[i] = snap.runeLevels[i];
+                    boolean wasActive = snap.runeActive == null || i >= snap.runeActive.length || snap.runeActive[i];
+                    active[i] |= snap.runeLevels[i] > 0 && wasActive;
+                }
+            } catch (Exception ignored) { }
+        }
+        Preferences old = Gdx.app.getPreferences("gnomes_save_v2");
+        for (int i = 0; i < best.length; i++) {
+            best[i] = Math.max(best[i], old.getInteger("runeLevel_" + i, 0));
+            if (best[i] > 0) active[i] = true;
+            meta.putInteger("runeLevel_" + i, best[i]);
+            meta.putBoolean("runeActive_" + i, active[i]);
+        }
+        meta.putBoolean("initialized", true);
+        meta.flush();
     }
+
+    public boolean exists(int slot) { return valid(slot) && prefs.contains(key(slot)); }
 
     public GameState fresh(int slot) { return fresh(slot, 2); }
 
     public GameState fresh(int slot, int difficulty) {
         GameState state = new GameState();
         state.setDifficulty(difficulty);
+        applyMeta(state);
         return state;
     }
 
@@ -29,7 +59,10 @@ public final class SaveRepository {
         if (!exists(slot)) return fresh(slot);
         try {
             Snapshot s = json.fromJson(Snapshot.class, prefs.getString(key(slot)));
-            return s == null ? fresh(slot) : s.toState();
+            GameState state = s == null ? fresh(slot) : s.toState();
+            importLegacyMetaIfNeeded(state);
+            applyMeta(state);
+            return state;
         } catch (Exception ignored) {
             return fresh(slot);
         }
@@ -37,15 +70,13 @@ public final class SaveRepository {
 
     public Snapshot summary(int slot) {
         if (!exists(slot)) return null;
-        try {
-            return json.fromJson(Snapshot.class, prefs.getString(key(slot)));
-        } catch (Exception ignored) {
-            return null;
-        }
+        try { return json.fromJson(Snapshot.class, prefs.getString(key(slot))); }
+        catch (Exception ignored) { return null; }
     }
 
     public void save(int slot, GameState state) {
         if (!valid(slot) || state == null) return;
+        persistMeta(state);
         Snapshot s = Snapshot.fromState(state);
         s.savedAt = System.currentTimeMillis();
         prefs.putString(key(slot), json.toJson(s));
@@ -58,12 +89,11 @@ public final class SaveRepository {
         prefs.remove(key(slot));
         if (prefs.getInteger("lastSlot", 1) == slot) {
             int replacement = 1;
-            for (int i = 1; i <= SLOT_COUNT; i++) {
-                if (i != slot && exists(i)) { replacement = i; break; }
-            }
+            for (int i = 1; i <= SLOT_COUNT; i++) if (i != slot && exists(i)) { replacement = i; break; }
             prefs.putInteger("lastSlot", replacement);
         }
         prefs.flush();
+        // Deliberately do NOT delete META_NAME: runes belong to the player, not an expedition slot.
     }
 
     public int lastSlot() {
@@ -74,6 +104,51 @@ public final class SaveRepository {
     public boolean anySave() {
         for (int i = 1; i <= SLOT_COUNT; i++) if (exists(i)) return true;
         return false;
+    }
+
+    public int deepestDepth() {
+        int deepest = 1;
+        for (int i = 1; i <= SLOT_COUNT; i++) {
+            Snapshot s = summary(i);
+            if (s != null) deepest = Math.max(deepest, s.depth);
+        }
+        return deepest;
+    }
+
+    private void importLegacyMetaIfNeeded(GameState state) {
+        if (meta.getBoolean("initialized", false)) return;
+        boolean hadRune = false;
+        for (int i = 0; i < state.runeLevels.length; i++) {
+            if (state.runeLevels[i] > 0) {
+                hadRune = true;
+                meta.putInteger("runeLevel_" + i, state.runeLevels[i]);
+                meta.putBoolean("runeActive_" + i, true);
+            }
+        }
+        // Even a profile with no old runes is considered initialized. Otherwise every empty slot would migrate again.
+        meta.putBoolean("initialized", true);
+        meta.putBoolean("legacyImported", hadRune);
+        meta.flush();
+    }
+
+    private void applyMeta(GameState state) {
+        if (!meta.getBoolean("initialized", false)) {
+            meta.putBoolean("initialized", true);
+            meta.flush();
+        }
+        for (int i = 0; i < state.runeLevels.length; i++) {
+            state.runeLevels[i] = Math.max(0, meta.getInteger("runeLevel_" + i, 0));
+            state.runeActive[i] = meta.getBoolean("runeActive_" + i, state.runeLevels[i] > 0);
+        }
+    }
+
+    private void persistMeta(GameState state) {
+        meta.putBoolean("initialized", true);
+        for (int i = 0; i < state.runeLevels.length; i++) {
+            meta.putInteger("runeLevel_" + i, Math.max(0, state.runeLevels[i]));
+            meta.putBoolean("runeActive_" + i, state.runeActive[i] && state.runeLevels[i] > 0);
+        }
+        meta.flush();
     }
 
     private static boolean valid(int slot) { return slot >= 1 && slot <= SLOT_COUNT; }
@@ -97,7 +172,9 @@ public final class SaveRepository {
         public int[] tierCounts;
         public int[] tierLevels;
         public int[] artifactLevels;
+        public boolean[] artifactActive;
         public int[] runeLevels;
+        public boolean[] runeActive;
         public int[] tierRunes;
         public int[] upgradeRunes;
         public int[] artifactRunes;
@@ -128,7 +205,9 @@ public final class SaveRepository {
             s.tierCounts = st.tierCounts.clone();
             s.tierLevels = st.tierLevels.clone();
             s.artifactLevels = st.artifactLevels.clone();
+            s.artifactActive = st.artifactActive.clone();
             s.runeLevels = st.runeLevels.clone();
+            s.runeActive = st.runeActive.clone();
             s.tierRunes = st.tierRunes.clone();
             s.upgradeRunes = st.upgradeRunes.clone();
             s.artifactRunes = st.artifactRunes.clone();
@@ -142,10 +221,10 @@ public final class SaveRepository {
 
         public GameState toState() {
             GameState st = new GameState();
-            st.stone = stone;
-            st.silver = silver;
-            st.gold = gold;
-            st.diamond = diamond;
+            st.stone = Math.max(0, stone);
+            st.silver = Math.max(0, silver);
+            st.gold = Math.max(0, gold);
+            st.diamond = Math.max(0, diamond);
             st.depth = Math.max(1, depth);
             st.depthProgress = Math.max(0, depthProgress);
             st.rocksBroken = Math.max(0, rocksBroken);
@@ -158,19 +237,31 @@ public final class SaveRepository {
             copy(tierCounts, st.tierCounts);
             copy(tierLevels, st.tierLevels);
             copy(artifactLevels, st.artifactLevels);
+            copy(artifactActive, st.artifactActive);
             copy(runeLevels, st.runeLevels);
+            copy(runeActive, st.runeActive);
             copy(tierRunes, st.tierRunes);
             copy(upgradeRunes, st.upgradeRunes);
             copy(artifactRunes, st.artifactRunes);
             copy(infrastructureRunes, st.infrastructureRunes);
+            for (int i = 0; i < st.artifactLevels.length; i++) {
+                st.artifactLevels[i] = st.artifactLevels[i] > 0 ? 1 : 0;
+                if (artifactActive == null && st.artifactLevels[i] > 0) st.artifactActive[i] = true;
+            }
             st.miningUpgrade = Math.max(0, miningUpgrade);
             st.speedUpgrade = Math.max(0, speedUpgrade);
             st.combatUpgrade = Math.max(0, combatUpgrade);
             st.guardianLevel = Math.max(0, guardianLevel);
+            if (st.totalGnomes() <= 0) st.tierCounts[0] = 1;
             return st;
         }
 
         private static void copy(int[] src, int[] dst) {
+            if (src == null || dst == null) return;
+            System.arraycopy(src, 0, dst, 0, Math.min(src.length, dst.length));
+        }
+
+        private static void copy(boolean[] src, boolean[] dst) {
             if (src == null || dst == null) return;
             System.arraycopy(src, 0, dst, 0, Math.min(src.length, dst.length));
         }

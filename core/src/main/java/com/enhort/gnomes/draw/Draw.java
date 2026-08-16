@@ -3,6 +3,7 @@ package com.enhort.gnomes.draw;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -50,7 +51,9 @@ public class Draw implements Disposable {
         String cyrillic = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя";
         String extra = "×•↑↓←→◆⛏‹›…○●—–«»";
         font = generate("fonts/DejaVuSans.ttf", 32, cyrillic + extra);
-        fontBold = generate("fonts/DejaVuSans-Bold.ttf", 32, cyrillic + extra);
+        String display = Gdx.files.internal("fonts/RuslanDisplay-Regular.ttf").exists()
+                ? "fonts/RuslanDisplay-Regular.ttf" : "fonts/DejaVuSans-Bold.ttf";
+        fontBold = generate(display, 32, cyrillic + extra);
     }
 
     private static BitmapFont generate(String path, int size, String extra) {
@@ -289,6 +292,13 @@ public class Draw implements Disposable {
             drawX = x - layout.width * 0.5f;
         }
         f.draw(batch, s, drawX, y - textSize * 0.78f);
+    }
+
+    public void image(Texture texture, float l, float t, float r, float b) {
+        if (texture == null || r <= l || b <= t) return;
+        ensure(Mode.TEXT);
+        batch.setColor(1f, 1f, 1f, 1f);
+        batch.draw(texture, l, t, r - l, b - t, 0, 0, texture.getWidth(), texture.getHeight(), false, true);
     }
 
     private void applyFontColor(BitmapFont f) {
