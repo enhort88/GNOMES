@@ -1,48 +1,44 @@
 package com.enhort.gnomes;
 
-import com.badlogic.gdx.ApplicationAdapter;
-import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Game;
+import com.badlogic.gdx.Screen;
 import com.enhort.gnomes.draw.Draw;
-import com.enhort.gnomes.game.MineScreen;
+import com.enhort.gnomes.game.CaveScreen;
+import com.enhort.gnomes.menu.MenuScreen;
+import com.enhort.gnomes.save.SaveRepository;
 
-public class GnomesGame extends ApplicationAdapter {
-    private Draw draw;
-    private MineScreen mine;
+/** Application shell. Gameplay no longer owns the app lifecycle, so menu/save screens work like DOT//CORE. */
+public final class GnomesGame extends Game {
+    public Draw draw;
+    public SaveRepository saves;
 
-    @Override
-    public void create() {
+    @Override public void create() {
         draw = new Draw();
         draw.loadFonts();
-        mine = new MineScreen();
-        Gdx.input.setInputProcessor(mine);
+        saves = new SaveRepository();
+        openMenu();
     }
 
-    @Override
-    public void resize(int width, int height) {
-        draw.resize(width, height);
-        mine.resize(width, height);
+    public void changeScreen(Screen next) {
+        Screen old = getScreen();
+        setScreen(next);
+        if (old != null && old != next) old.dispose();
     }
 
-    @Override
-    public void render() {
-        draw.beginFrame();
-        mine.render(draw, Gdx.graphics.getDeltaTime());
-        draw.endFrame();
+    public void openMenu() { changeScreen(new MenuScreen(this)); }
+    public void playSlot(int slot) { changeScreen(new CaveScreen(this, slot)); }
+    public void playNewSlot(int slot) {
+        saves.save(slot, saves.fresh(slot));
+        playSlot(slot);
     }
 
-    @Override
-    public void pause() {
-        if (mine != null) mine.pause();
+    @Override public void resize(int width, int height) {
+        if (draw != null) draw.resize(width, height);
+        super.resize(width, height);
     }
 
-    @Override
-    public void resume() {
-        if (mine != null) mine.resume();
-    }
-
-    @Override
-    public void dispose() {
-        if (mine != null) mine.pause();
+    @Override public void dispose() {
+        super.dispose();
         if (draw != null) draw.dispose();
     }
 }
