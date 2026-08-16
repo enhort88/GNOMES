@@ -6,6 +6,7 @@ import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.ScreenAdapter;
 import com.enhort.gnomes.GnomesGame;
 import com.enhort.gnomes.GameAudio;
+import com.enhort.gnomes.game.model.EnemyType;
 import com.enhort.gnomes.draw.Draw;
 import com.enhort.gnomes.save.SaveRepository;
 import com.enhort.gnomes.ui.UiTheme;
@@ -13,7 +14,7 @@ import com.enhort.gnomes.ui.UiTheme;
 import java.util.Random;
 
 public final class MenuScreen extends ScreenAdapter {
-    private enum Mode { MAIN, SLOTS, DIFFICULTY, SETTINGS, ABOUT, DELETE }
+    private enum Mode { MAIN, SLOTS, DIFFICULTY, BESTIARY, SETTINGS, ABOUT, DELETE }
 
     private static final class Box {
         float l,t,r,b;
@@ -33,7 +34,7 @@ public final class MenuScreen extends ScreenAdapter {
     private final GnomesGame game;
     private final Random rnd=new Random(0x6E6F6D6573L);
     private final Dust[] dust=new Dust[34];
-    private final Box[] main=new Box[6];
+    private final Box[] main=new Box[7];
     private final Box[] slots=new Box[SaveRepository.SLOT_COUNT];
     private final Box[] slotDelete=new Box[SaveRepository.SLOT_COUNT];
     private final Box[] difficultyButtons={new Box(),new Box(),new Box(),new Box()};
@@ -140,7 +141,7 @@ public final class MenuScreen extends ScreenAdapter {
         Draw d=game.draw;
         d.beginFrame();
         background(d);
-        switch(mode){case MAIN->main(d);case SLOTS->slots(d);case DIFFICULTY->difficulty(d);case SETTINGS->settings(d);case ABOUT->about(d);case DELETE->delete(d);}
+        switch(mode){case MAIN->main(d);case SLOTS->slots(d);case DIFFICULTY->difficulty(d);case BESTIARY->bestiary(d);case SETTINGS->settings(d);case ABOUT->about(d);case DELETE->delete(d);}
         d.endFrame();
     }
 
@@ -219,8 +220,9 @@ public final class MenuScreen extends ScreenAdapter {
         button(d,main[1],"ПРОДОЛЖИТЬ",game.saves.anySave(),UiTheme.GREEN,false,.94f);
         button(d,main[2],"СОХРАНЕНИЯ",true,UiTheme.STEEL,false,.92f);
         button(d,main[3],"НАСТРОЙКИ",true,UiTheme.STEEL,false,.92f);
-        button(d,main[4],"ОБ ИГРЕ",true,UiTheme.COPPER,false,.92f);
-        button(d,main[5],"ВЫХОД",true,UiTheme.RED,false,.92f);
+        button(d,main[4],"БЕСТИАРИЙ",true,UiTheme.COPPER,false,.92f);
+        button(d,main[5],"ОБ ИГРЕ",true,UiTheme.COPPER,false,.92f);
+        button(d,main[6],"ВЫХОД",true,UiTheme.RED,false,.92f);
         if(game.settings.freeShop||cheatNotice>0){
             d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.5f*ui;
             d.setColor(game.settings.freeShop?0xFFFFC74A:0xFF8D979D);
@@ -254,13 +256,42 @@ public final class MenuScreen extends ScreenAdapter {
     private void difficulty(Draw d){
         heading(d,"СЛОЖНОСТЬ ЭКСПЕДИЦИИ");
         d.align=Draw.Align.CENTER;d.textSize=7.8f*ui;d.setColor(0xFF9EAAAF);
-        d.text("После каждого уровня гномы и обычные апгрейды продаются.",width/2,128f*ui);
+        d.text("Деньги делятся по сложности, а половина отряда идёт глубже.",width/2,128f*ui);
         d.align=Draw.Align.LEFT;
         button(d,difficultyButtons[0],"ЛЁГКАЯ  •  перенос 1/2",true,UiTheme.GREEN,false,.82f);
         button(d,difficultyButtons[1],"СРЕДНЯЯ  •  перенос 1/3",true,UiTheme.GOLD,false,.82f);
         button(d,difficultyButtons[2],"СЛОЖНАЯ  •  перенос 1/4",true,UiTheme.COPPER,false,.82f);
         button(d,difficultyButtons[3],"БЕЗ ПЕРЕНОСА  •  0",true,UiTheme.RED,false,.82f);
         button(d,back,"НАЗАД",true,UiTheme.STEEL,false,.92f);
+    }
+
+    private void bestiary(Draw d){
+        heading(d,"КНИГА ВРАГОВ");
+        float l=18f*ui,r=width-18f*ui,t=135f*ui,b=back.t-10f*ui,mid=width/2f;
+        d.setColor(0xFF5A3D27);d.fillRoundRect(l-3f*ui,t-3f*ui,r+3f*ui,b+3f*ui,10f*ui);
+        d.setColor(0xFFF0E1B8);d.fillRoundRect(l,t,mid-3f*ui,b,7f*ui);d.fillRoundRect(mid+3f*ui,t,r,b,7f*ui);
+        d.setColor(0x33805B35);d.fillRect(mid-1f*ui,t+3f*ui,mid+1f*ui,b-3f*ui);
+        EnemyType[] all=EnemyType.values();int deepest=game.saves.deepestDepth();
+        float row=(b-t-18f*ui)/5f;
+        for(int i=0;i<all.length;i++){
+            EnemyType e=all[i];int col=i/5,ri=i%5;float x=col==0?l+10f*ui:mid+12f*ui,y=t+11f*ui+ri*row;
+            int unlock=enemyUnlock(e);boolean known=deepest>=unlock||game.settings.freeShop;
+            drawEnemyStamp(d,e,x+14f*ui,y+20f*ui,known);
+            d.bold=true;d.textSize=7.6f*ui;d.setColor(known?0xFF3B2A20:0xFF95876F);d.text(known?e.title.toUpperCase():"???",x+31f*ui,y+13f*ui);
+            d.bold=false;d.textSize=6.2f*ui;d.setColor(known?0xFF6B5844:0xFF9C907C);
+            d.text(known?enemyRole(e):"встречается глубже",x+31f*ui,y+29f*ui);
+            if(known){d.text("база HP "+Math.round(e.hp),x+31f*ui,y+43f*ui);}
+        }
+        d.align=Draw.Align.CENTER;d.textSize=6.8f*ui;d.setColor(0xFF7D6B52);d.text("Записи открываются по мере погружения. В TEST MODE книга полная.",width/2,b-8f*ui);d.align=Draw.Align.LEFT;
+        button(d,back,"ЗАКРЫТЬ КНИГУ",true,UiTheme.STEEL,false,.90f);
+    }
+
+    private int enemyUnlock(EnemyType e){return switch(e){case IMP->1;case GHOST->2;case DEMON->7;case SUCCUBUS->9;case IMP_KING->10;case STONE_GOLEM->12;case WATER_GOLEM->15;case FIRE_GOLEM->18;case DEMON_KING->20;case ELEMENTAL_KING->30;};}
+    private String enemyRole(EnemyType e){return switch(e){case IMP->"вор • боится отпора";case DEMON->"охотник на гномов";case SUCCUBUS->"чары • сеет драку";case GHOST->"летает сквозь стены";case STONE_GOLEM->"тяжёлый элементаль";case WATER_GOLEM->"водный элементаль";case FIRE_GOLEM->"не боится лавы";case IMP_KING->"босс • вор и призыватель";case DEMON_KING->"босс • убийца";case ELEMENTAL_KING->"босс • стихии";};}
+    private void drawEnemyStamp(Draw d,EnemyType e,float x,float y,boolean known){
+        int c=known?e.color:0xFF9B8F79;d.setColor(0x33614A31);d.fillCircle(x,y,13f*ui);d.setColor(c);d.fillCircle(x,y,known?7f*ui:5f*ui);
+        if(known&&e.isImp()){d.pathReset();d.moveTo(x-6f*ui,y-5f*ui);d.lineTo(x-11f*ui,y-12f*ui);d.lineTo(x-2f*ui,y-8f*ui);d.closePath();d.fillPath();d.pathReset();d.moveTo(x+6f*ui,y-5f*ui);d.lineTo(x+11f*ui,y-12f*ui);d.lineTo(x+2f*ui,y-8f*ui);d.closePath();d.fillPath();}
+        if(!known){d.bold=true;d.textSize=8f*ui;d.setColor(0xFFF0E1B8);d.align=Draw.Align.CENTER;d.text("?",x,y+3f*ui);d.align=Draw.Align.LEFT;d.bold=false;}
     }
 
     private void settings(Draw d){
@@ -326,8 +357,9 @@ public final class MenuScreen extends ScreenAdapter {
             if(main[0].hit(x,y)||main[2].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SLOTS;return;}
             if(main[1].hit(x,y)&&game.saves.anySave()){game.audio.play(GameAudio.Sfx.UI,.5f);game.playSlot(game.saves.lastSlot());return;}
             if(main[3].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SETTINGS;return;}
-            if(main[4].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.ABOUT;return;}
-            if(main[5].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);Gdx.app.exit();return;}
+            if(main[4].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.BESTIARY;return;}
+            if(main[5].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.ABOUT;return;}
+            if(main[6].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);Gdx.app.exit();return;}
         }else if(mode==Mode.SLOTS){
             for(int i=0;i<slots.length;i++){
                 int slot=i+1;
@@ -344,11 +376,13 @@ public final class MenuScreen extends ScreenAdapter {
                 game.audio.play(GameAudio.Sfx.UI,.6f);int slot=pendingNewSlot;pendingNewSlot=-1;game.playNewSlot(slot,i+1);return;
             }
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);pendingNewSlot=-1;mode=Mode.SLOTS;}
+        }else if(mode==Mode.BESTIARY){
+            if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
         }else if(mode==Mode.SETTINGS){
-            if(soundToggle.hit(x,y)){game.settings.toggleSound();if(game.settings.soundEnabled)game.audio.play(GameAudio.Sfx.UI,.75f);return;}
+            if(soundToggle.hit(x,y)){game.settings.toggleSound();game.audio.refreshMusic();if(game.settings.soundEnabled)game.audio.play(GameAudio.Sfx.UI,.75f);return;}
             if(vibrationToggle.hit(x,y)){game.settings.toggleVibration();if(game.settings.vibrationEnabled)game.audio.vibrate(45);game.audio.play(GameAudio.Sfx.UI,.5f);return;}
-            if(volumeDown.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume-.10f);game.audio.play(GameAudio.Sfx.UI,.6f);return;}
-            if(volumeUp.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume+.10f);game.audio.play(GameAudio.Sfx.UI,.6f);return;}
+            if(volumeDown.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume-.10f);game.audio.refreshMusic();game.audio.play(GameAudio.Sfx.UI,.6f);return;}
+            if(volumeUp.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume+.10f);game.audio.refreshMusic();game.audio.play(GameAudio.Sfx.UI,.6f);return;}
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
         }else if(mode==Mode.ABOUT){
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
