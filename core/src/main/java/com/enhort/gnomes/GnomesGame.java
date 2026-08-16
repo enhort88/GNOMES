@@ -4,6 +4,7 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Screen;
 import com.enhort.gnomes.draw.Draw;
 import com.enhort.gnomes.game.CaveScreen;
+import com.enhort.gnomes.game.GameState;
 import com.enhort.gnomes.menu.MenuScreen;
 import com.enhort.gnomes.save.SaveRepository;
 
@@ -11,10 +12,15 @@ import com.enhort.gnomes.save.SaveRepository;
 public final class GnomesGame extends Game {
     public Draw draw;
     public SaveRepository saves;
+    public GameSettings settings;
+    public GameAudio audio;
 
     @Override public void create() {
         draw = new Draw();
         draw.loadFonts();
+        settings = new GameSettings();
+        GameState.FREE_SHOP = settings.freeShop;
+        audio = new GameAudio(settings);
         saves = new SaveRepository();
         openMenu();
     }
@@ -32,6 +38,10 @@ public final class GnomesGame extends Game {
         playSlot(slot);
     }
 
+    public void syncCheats() {
+        GameState.FREE_SHOP = settings != null && settings.freeShop;
+    }
+
     @Override public void resize(int width, int height) {
         if (draw != null) draw.resize(width, height);
         super.resize(width, height);
@@ -39,6 +49,7 @@ public final class GnomesGame extends Game {
 
     @Override public void dispose() {
         super.dispose();
+        if (audio != null) audio.dispose();
         if (draw != null) draw.dispose();
     }
 }
