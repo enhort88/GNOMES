@@ -615,11 +615,12 @@ public final class CaveScreen extends ScreenAdapter {
         for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}
     }
 
-    private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}int limit=workers.size()>120?170:workers.size()>70?230:420;if(fx.size()>limit)fx.subList(0,fx.size()-limit).clear();}
-    private void spawnRockHit(Vein v,int power){int n=workers.size()>120?1:workers.size()>70?2:5+Math.min(5,power);for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-.2f*s,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
-    private void spawnBreak(Vein v){for(int i=0;i<22;i++){float a=random.nextFloat()*6.28f,s=(30+random.nextFloat()*110)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s-35f*ui,.45f+random.nextFloat()*.65f,(1.5f+random.nextFloat()*3.4f)*ui,adjust(v.type.color,.65f+random.nextFloat()*.5f),false));}}
-    private void spawnDeath(Mob m){for(int i=0;i<18+(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()?16:0);i++){float a=random.nextFloat()*6.28f,s=(35+random.nextFloat()*95)*ui;fx.add(new Fx(m.x,m.y,(float)Math.cos(a)*s,(float)Math.sin(a)*s,.45f+random.nextFloat()*.5f,(1.5f+random.nextFloat()*3f)*ui,m.type.color,false));}}
-    private void spawnSparks(float x,float y,int color,int n){for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,s=(25+random.nextFloat()*85)*ui;fx.add(new Fx(x,y,(float)Math.cos(a)*s,(float)Math.sin(a)*s,.18f+random.nextFloat()*.3f,(1+random.nextFloat()*1.7f)*ui,color,true));}}
+    private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}int limit=workers.size()>120?120:workers.size()>90?165:workers.size()>70?215:400;if(fx.size()>limit)fx.subList(0,fx.size()-limit).clear();}
+    private int fxBudget(int normal,int crowded){return workers.size()>90?crowded:normal;}
+    private void spawnRockHit(Vein v,int power){int n=workers.size()>120?1:workers.size()>80?2:5+Math.min(5,power);for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(25+random.nextFloat()*65+power*7)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp-.2f*sp,.35f+random.nextFloat()*.35f,(1.1f+random.nextFloat()*2.2f)*ui,adjust(v.type.color,.75f+random.nextFloat()*.35f),false));}}
+    private void spawnBreak(Vein v){int n=fxBudget(18,7);for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(30+random.nextFloat()*110)*ui;fx.add(new Fx(v.x,v.y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp-35f*ui,.45f+random.nextFloat()*.65f,(1.5f+random.nextFloat()*3.4f)*ui,adjust(v.type.color,.65f+random.nextFloat()*.5f),false));}}
+    private void spawnDeath(Mob m){int n=fxBudget(16+(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()?12:0),6+(m.type.ordinal()>=EnemyType.IMP_KING.ordinal()?5:0));for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(35+random.nextFloat()*95)*ui;fx.add(new Fx(m.x,m.y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp,.45f+random.nextFloat()*.5f,(1.5f+random.nextFloat()*3f)*ui,m.type.color,false));}}
+    private void spawnSparks(float x,float y,int color,int n){n=Math.min(n,fxBudget(n,Math.max(1,n/2)));for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(25+random.nextFloat()*85)*ui;fx.add(new Fx(x,y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp,.18f+random.nextFloat()*.3f,(1+random.nextFloat()*1.7f)*ui,color,true));}}
 
     private void drawWorld(Draw d){
         d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawHazards(d);drawVeins(d);drawChest(d);
@@ -655,6 +656,13 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void drawVeins(Draw d){for(Vein v:veins)if(!v.dead||v.death<.55f){drawVein(d,v);if(priorityKind==PriorityKind.VEIN&&v==priorityVein&&!v.dead)drawPriorityMarker(d,v);}}
+    private float appearScale(float remaining,float duration){float p=1f-Math.min(1f,Math.max(0f,remaining/duration));p=ease(p);return .18f+.82f*p;}
+    private void drawArrivalRing(Draw d,float x,float y,float radius,float remaining,float duration,int color){
+        if(remaining<=0)return;float p=1f-Math.min(1f,remaining/duration),fade=1f-p;float r=radius*(.55f+p*.85f);
+        d.setColor(alpha(color,.18f+.45f*fade));d.fillCircle(x,y,r*.50f);
+        d.setColor(alpha(color,.35f+.55f*fade));d.strokeWidth=(1f+fade*1.6f)*ui;d.strokeCircle(x,y,r);
+        for(int i=0;i<4;i++){float a=i*1.5708f+elapsed*4.5f;d.fillCircle(x+(float)Math.cos(a)*r,y+(float)Math.sin(a)*r,(1.2f+fade*1.4f)*ui);}
+    }
     private void drawPriorityMarker(Draw d,Vein v){float p=.5f+.5f*(float)Math.sin(priorityPulse*6f);float rr=v.r*(1.35f+.10f*p);d.setColor(0x66FFD35A);d.strokeWidth=(1.4f+p*1.2f)*ui;d.strokeCircle(v.x,v.y,rr);d.setColor(0xCCFFD35A);d.pathReset();d.moveTo(v.x,v.y-v.r*1.65f);d.lineTo(v.x-v.r*.22f,v.y-v.r*1.35f);d.lineTo(v.x+v.r*.22f,v.y-v.r*1.35f);d.closePath();d.fillPath();}
     private void drawPriorityOverlay(Draw d){
         if(priorityKind==PriorityKind.NONE)return;
@@ -665,8 +673,9 @@ public final class CaveScreen extends ScreenAdapter {
         d.line(x-r*1.25f,y,x-r*.55f,y);d.line(x+r*.55f,y,x+r*1.25f,y);d.line(x,y-r*1.25f,x,y-r*.55f);d.line(x,y+r*.55f,x,y+r*1.25f);
     }
     private void drawVein(Draw d,Vein v){
-        float death=v.dead?Math.max(0,1-v.death/.55f):1;float damage=1-Math.max(0,v.hp)/v.maxHp;float shake=v.hitFlash>0?(float)Math.sin(v.hitFlash*210f)*2.1f*ui*(v.hitFlash/.16f):0;
-        d.save();d.translate(shake,0);d.scale(death,death);float x=v.x,y=v.y,r=v.r;
+        float death=v.dead?Math.max(0,1-v.death/.55f):1;float damage=1-Math.max(0,v.hp)/v.maxHp;float shake=v.hitFlash>0?(float)Math.sin(v.hitFlash*210f)*2.1f*ui*(v.hitFlash/.16f):0;float born=appearScale(v.spawn,.58f);float x=v.x,y=v.y,r=v.r;
+        if(v.spawn>0)drawArrivalRing(d,x,y,r*1.25f,v.spawn,.58f,adjust(v.type.color,1.18f));
+        d.save();d.translate(x,y);d.scale(death*born,death*born);d.translate(-x,-y);d.translate(shake,0);
         d.setColor(0x88000000);polyRock(d,v,x+2f*ui,y+3f*ui,r*1.07f,0xFF090909,0);
         polyRock(d,v,x,y,r,adjust(v.type.color,.62f),0);polyRock(d,v,x-r*.08f,y-r*.10f,r*.82f,adjust(v.type.color,.86f),1);
         drawRockIdentity(d,v,x,y,r,damage);
@@ -710,9 +719,37 @@ public final class CaveScreen extends ScreenAdapter {
         d.setColor(0x66000000);d.fillOval(x-s*.38f,y+s*.18f,x+s*.38f,y+s*.34f);d.setColor(0xFF5A351E);d.fillRoundRect(x-s*.29f,y-s*.14f,x+s*.29f,y+s*.22f,4f*ui);d.setColor(0xFF8A572C);d.fillRoundRect(x-s*.30f,y-s*.28f,x+s*.30f,y-s*.02f,8f*ui);d.setColor(0xFFD4A342);d.fillRect(x-s*.035f,y-s*.15f,x+s*.035f,y+s*.12f);d.fillCircle(x,y+s*.04f,s*.045f);
         if(state.guardianLevel>0)drawGuardian(d,x-s*.46f,y-s*.04f,s*.54f);
     }
-    private void drawGuardian(Draw d,float x,float y,float s){float bob=(float)Math.sin(elapsed*3.1f)*1.1f*ui;d.save();d.translate(x,y+bob);d.setColor(0x55000000);d.fillOval(-s*.28f,s*.42f,s*.28f,s*.53f);d.setColor(0xFF314B5B);d.fillOval(-s*.22f,-s*.02f,s*.22f,s*.37f);d.setColor(0xFFE4B483);d.fillCircle(0,-s*.18f,s*.20f);d.setColor(0xFFD8D5CC);d.pathReset();d.moveTo(-s*.17f,-s*.10f);d.lineTo(0,s*.20f);d.lineTo(s*.17f,-s*.10f);d.closePath();d.fillPath();d.setColor(0xFF597D91);d.pathReset();d.moveTo(-s*.21f,-s*.31f);d.lineTo(0,-s*.62f);d.lineTo(s*.22f,-s*.31f);d.closePath();d.fillPath();d.setColor(0xFFC7D1D7);d.strokeWidth=s*.09f;d.line(s*.23f,-s*.02f,s*.48f,s*.32f);d.line(s*.36f,s*.12f,s*.54f,-s*.05f);d.restore();}
+    private void drawGuardian(Draw d,float x,float y,float s){
+        float bob=(float)Math.sin(elapsed*3.1f)*1.1f*ui,attack=guardianAttackAnim>0?(float)Math.sin((.34f-guardianAttackAnim)/.34f*Math.PI):0;
+        float appear=guardianSpawnAnim>0?appearScale(guardianSpawnAnim,.70f):1f;
+        if(guardianSpawnAnim>0)drawArrivalRing(d,x,y,s*.80f,guardianSpawnAnim,.70f,0xFF70D7FF);
+        d.save();d.translate(x,y+bob);d.scale(appear,appear);
+        d.setColor(0x66000000);d.fillOval(-s*.38f,s*.48f,s*.40f,s*.62f);
+        // boots and legs
+        d.setColor(0xFF302A27);d.strokeWidth=s*.13f;d.line(-s*.13f,s*.25f,-s*.20f,s*.52f);d.line(s*.13f,s*.25f,s*.20f,s*.52f);d.fillOval(-s*.32f,s*.46f,-s*.08f,s*.58f);d.fillOval(s*.08f,s*.46f,s*.32f,s*.58f);
+        // steel-blue coat and plate
+        d.setColor(0xFF27495B);d.fillOval(-s*.31f,-s*.03f,s*.31f,s*.38f);d.setColor(0xFF718A98);d.fillRoundRect(-s*.24f,s*.02f,s*.24f,s*.30f,s*.05f);d.setColor(0xFFBCD0D8);d.strokeWidth=s*.045f;d.line(-s*.17f,s*.05f,s*.17f,s*.25f);d.line(s*.17f,s*.05f,-s*.17f,s*.25f);
+        // head, nose, beard
+        d.setColor(0xFFE4B483);d.fillCircle(0,-s*.22f,s*.22f);d.fillCircle(s*.20f,-s*.20f,s*.055f);d.setColor(0xFFE2E4E2);d.pathReset();d.moveTo(-s*.20f,-s*.11f);d.lineTo(0,s*.23f);d.lineTo(s*.21f,-s*.11f);d.lineTo(s*.09f,s*.10f);d.lineTo(-s*.08f,s*.10f);d.closePath();d.fillPath();
+        d.setColor(0xFF101314);d.fillCircle(s*.11f,-s*.27f,s*.025f);
+        // helmet with nose guard
+        d.setColor(0xFF7696A7);d.fillOval(-s*.27f,-s*.50f,s*.27f,-s*.27f);d.setColor(0xFFC9D7DE);d.fillRect(-s*.29f,-s*.35f,s*.29f,-s*.29f);d.fillRect(-s*.035f,-s*.36f,s*.035f,-s*.12f);d.setColor(0xFF476273);d.pathReset();d.moveTo(-s*.11f,-s*.50f);d.lineTo(0,-s*.67f);d.lineTo(s*.11f,-s*.50f);d.closePath();d.fillPath();
+        // shield on left
+        d.setColor(0xFF233641);d.pathReset();d.moveTo(-s*.34f,-s*.02f);d.lineTo(-s*.60f,s*.05f);d.lineTo(-s*.55f,s*.38f);d.lineTo(-s*.34f,s*.52f);d.lineTo(-s*.15f,s*.34f);d.closePath();d.fillPath();d.setColor(0xFF9DB2BC);d.strokeWidth=s*.045f;d.line(-s*.52f,s*.10f,-s*.25f,s*.38f);d.line(-s*.25f,s*.10f,-s*.52f,s*.38f);d.setColor(UiTheme.GOLD);d.fillCircle(-s*.37f,s*.24f,s*.055f);
+        // animated spear on right
+        float thrust=attack*s*.32f;d.setColor(0xFFE4B483);d.fillCircle(s*.23f+thrust*.25f,s*.03f,s*.065f);d.setColor(0xFF75523A);d.strokeWidth=s*.065f;d.line(s*.20f,s*.02f,s*.82f+thrust,-s*.24f);d.setColor(0xFFDCE7EC);d.pathReset();d.moveTo(s*.76f+thrust,-s*.21f);d.lineTo(s*1.03f+thrust,-s*.37f);d.lineTo(s*.87f+thrust,-s*.10f);d.closePath();d.fillPath();d.setColor(0xFFFFFFFF);d.strokeWidth=s*.022f;d.line(s*.85f+thrust,-s*.28f,s*.98f+thrust,-s*.35f);
+        if(state.guardianLevel>1){d.setColor(0xFF69D9F0);d.fillCircle(s*.02f,s*.11f,s*.045f);}
+        d.restore();
+    }
 
-    private void drawWorker(Draw d,Worker w){float s=w.tier.size*ui;switch(w.tier){case MINER,VETERAN,TWIN_PICK->drawDwarf(d,w,s);case DRILL_RIG->drawDrill(d,w,s);case EXCAVATOR->drawExcavator(d,w,s);case IRON_GOLEM->drawIron(d,w,s);}int rune=state.tierRunes[w.tier.ordinal()];if(rune>=0&&rune<RuneType.values().length&&state.runeLevels[rune]>0)drawRune(d,w.x+s*.45f,w.y-s*.60f,4.4f*ui,RuneType.values()[rune]);}
+    private void drawWorker(Draw d,Worker w){
+        float s=w.tier.size*ui,scale=appearScale(w.spawn,.52f);
+        if(w.spawn>0)drawArrivalRing(d,w.x,w.y,s*.76f,w.spawn,.52f,w.tier.color);
+        if(w.spawn>0){d.save();d.translate(w.x,w.y);d.scale(scale,scale);d.translate(-w.x,-w.y);}
+        switch(w.tier){case MINER,VETERAN,TWIN_PICK->drawDwarf(d,w,s);case DRILL_RIG->drawDrill(d,w,s);case EXCAVATOR->drawExcavator(d,w,s);case IRON_GOLEM->drawIron(d,w,s);}
+        int rune=state.tierRunes[w.tier.ordinal()];if(rune>=0&&rune<RuneType.values().length&&state.runeLevels[rune]>0)drawRune(d,w.x+s*.45f,w.y-s*.60f,4.4f*ui,RuneType.values()[rune]);
+        if(w.spawn>0)d.restore();
+    }
 
     private float strikeProgress(Worker w,float duration){return w.swing<=0?0:1-w.swing/duration;}
     private float pickAngle(Worker w){if(w.action!=WorkerAction.MINE&&w.action!=WorkerAction.FIGHT)return 8f;float p=strikeProgress(w,w.action==WorkerAction.FIGHT?.46f:.58f);if(p<.28f)return lerp(18f,-92f,ease(p/.28f));if(p<.60f)return lerp(-92f,50f,ease((p-.28f)/.32f));return lerp(50f,10f,ease((p-.60f)/.40f));}
@@ -722,7 +759,7 @@ public final class CaveScreen extends ScreenAdapter {
         d.setColor(0x55000000);d.fillOval(-s*.38f,s*.50f+bounce,s*.38f,s*.64f+bounce);
         // planted feet, separate from the torso, make walking read at tiny phone scale.
         d.setColor(0xFF3A2C25);d.strokeWidth=s*.12f;d.line(-s*.11f,s*.29f,-s*.18f+stride*s*.14f,s*.55f);d.line(s*.11f,s*.29f,s*.18f-stride*s*.14f,s*.55f);d.fillOval(-s*.30f+stride*s*.14f,s*.50f,-s*.06f+stride*s*.14f,s*.60f);d.fillOval(s*.06f-stride*s*.14f,s*.50f,s*.30f-stride*s*.14f,s*.60f);
-        d.setColor(adjust(w.tier.color,.62f));d.fillOval(-s*.30f,-s*.01f,s*.30f,s*.38f);d.setColor(0xFF5D3E28);d.fillRect(-s*.31f,s*.20f,s*.31f,s*.27f);d.setColor(0xFFD5A73A);d.fillRect(-s*.04f,s*.19f,s*.05f,s*.28f);
+        d.setColor(adjust(w.tier.color,.62f));d.fillOval(-s*.30f,-s*.01f,s*.30f,s*.38f);d.setColor(adjust(w.tier.color,1.28f));d.strokeWidth=s*.035f;d.line(-s*.19f,s*.03f,-s*.19f,s*.28f);d.setColor(0xFF5D3E28);d.fillRect(-s*.31f,s*.20f,s*.31f,s*.27f);d.setColor(0xFFD5A73A);d.fillRect(-s*.04f,s*.19f,s*.05f,s*.28f);d.setColor(0xFFB8833B);d.fillCircle(-s*.27f,s*.04f,s*.065f);
         d.setColor(0xFFE5B686);d.fillCircle(0,-s*.22f,s*.25f);d.fillCircle(-s*.24f,-s*.20f,s*.07f);
         // beard is layered and sways opposite the stride.
         float sway=-stride*s*.035f;d.setColor(w.tier==GnomeTier.VETERAN?0xFFD8D4C9:0xFFECE7DA);d.pathReset();d.moveTo(-s*.23f,-s*.12f);d.quadTo(sway,s*.39f,s*.25f,-s*.12f);d.quadTo(sway,s*.22f,-s*.23f,-s*.12f);d.closePath();d.fillPath();d.setColor(0xFFC9C5BA);d.pathReset();d.moveTo(-s*.08f,-s*.06f);d.quadTo(sway,s*.30f,s*.06f,-s*.03f);d.lineTo(s*.15f,-s*.11f);d.closePath();d.fillPath();
@@ -733,7 +770,16 @@ public final class CaveScreen extends ScreenAdapter {
         if(w.tier==GnomeTier.VETERAN){d.setColor(0xFFC79A3B);d.fillCircle(-s*.30f,s*.02f,s*.09f);}
         d.restore();if(w.hasCargo())drawSack(d,w,s);
     }
-    private void drawAnimatedPick(Draw d,float x,float y,float s,float angle,float hand){d.save();d.translate(x,y);d.rotate(angle);d.setColor(0xFFE3B385);d.fillCircle(0,0,s*.07f);d.setColor(0xFF765033);d.strokeWidth=s*.075f;d.line(0,0,s*.50f,s*.35f);d.setColor(0xFFC8D0D5);d.strokeWidth=s*.09f;d.line(-s*.11f,-s*.02f,s*.17f,-s*.02f);d.setColor(0xFFF0F4F6);d.strokeWidth=s*.026f;d.line(-s*.08f,-s*.045f,s*.12f,-s*.045f);d.restore();}
+    private void drawAnimatedPick(Draw d,float x,float y,float s,float angle,float hand){
+        d.save();d.translate(x,y);d.rotate(angle);
+        d.setColor(0xFF3D291C);d.strokeWidth=s*.105f;d.line(0,0,s*.61f,s*.43f);
+        d.setColor(0xFF8A5A32);d.strokeWidth=s*.068f;d.line(0,0,s*.61f,s*.43f);
+        d.setColor(0xFF56351F);d.fillCircle(0,0,s*.085f);d.setColor(0xFFF0BE8C);d.fillCircle(0,0,s*.060f);
+        d.setColor(0xFF59646A);d.strokeWidth=s*.135f;d.line(-s*.19f,-s*.035f,s*.23f,-s*.035f);
+        d.setColor(0xFFD8E0E4);d.strokeWidth=s*.085f;d.line(-s*.19f,-s*.035f,s*.23f,-s*.035f);
+        d.setColor(0xFFFFFFFF);d.strokeWidth=s*.025f;d.line(-s*.14f,-s*.068f,s*.16f,-s*.068f);
+        d.restore();
+    }
     private void drawSack(Draw d,Worker w,float s){float bob=(float)Math.sin(w.walkCycle+w.phase)*1.3f*ui;d.setColor(0xFF735139);d.fillCircle(w.x-s*.38f,w.y+s*.18f+bob,Math.max(4f*ui,s*.18f));d.setColor(0xFFC7A16A);d.fillRect(w.x-s*.48f,w.y-s*.02f+bob,w.x-s*.30f,w.y+s*.04f+bob);}
 
     private void drawDrill(Draw d,Worker w,float s){float stride=(float)Math.sin(w.walkCycle+w.phase);float mining=w.action==WorkerAction.MINE?strikeProgress(w,.58f):0;float dir=facing(w);d.save();d.translate(w.x,w.y);d.scale(dir,1);d.setColor(0x55000000);d.fillOval(-s*.55f,s*.40f,s*.55f,s*.60f);d.setColor(0xFF403A34);d.fillRoundRect(-s*.48f,s*.12f,s*.40f,s*.45f,s*.10f);d.setColor(0xFF282827);for(int i=0;i<3;i++){float xx=-s*.32f+i*s*.31f;d.fillCircle(xx,s*.45f,s*.12f);d.setColor(0xFF60666A);d.fillCircle(xx,s*.45f,s*.052f);d.setColor(0xFF282827);}
@@ -750,16 +796,50 @@ public final class CaveScreen extends ScreenAdapter {
     private void drawIron(Draw d,Worker w,float s){float stride=(float)Math.sin(w.walkCycle+w.phase);float p=w.action==WorkerAction.MINE||w.action==WorkerAction.FIGHT?strikeProgress(w,w.action==WorkerAction.FIGHT?.46f:.58f):0;float dir=facing(w);d.save();d.translate(w.x,w.y-Math.abs(stride)*1.2f*ui);d.scale(dir,1);d.setColor(0x66000000);d.fillOval(-s*.53f,s*.49f,s*.53f,s*.70f);d.setColor(0xFF59636A);d.fillRoundRect(-s*.38f,-s*.04f,s*.38f,s*.46f,s*.10f);d.setColor(0xFF9FACB5);d.fillCircle(0,-s*.34f,s*.29f);d.setColor(0xFF242B30);d.fillRect(-s*.21f,-s*.43f,s*.21f,-s*.33f);d.setColor(0xFF6EE8FF);d.fillCircle(-s*.10f,-s*.38f,s*.035f);d.fillCircle(s*.10f,-s*.38f,s*.035f);d.setColor(0xFFCDD6DB);d.pathReset();d.moveTo(-s*.22f,-s*.20f);d.lineTo(0,s*.23f);d.lineTo(s*.22f,-s*.20f);d.lineTo(s*.08f,s*.16f);d.lineTo(-s*.08f,s*.16f);d.closePath();d.fillPath();d.setColor(0xFF69747B);d.strokeWidth=s*.17f;float punch=(float)Math.sin(p*Math.PI)*s*.20f;d.line(-s*.34f,s*.02f,-s*.56f,s*.34f);d.line(s*.34f,s*.02f,s*.58f+punch,s*.24f);d.line(-s*.17f,s*.42f,-s*.24f+stride*s*.05f,s*.68f);d.line(s*.17f,s*.42f,s*.24f-stride*s*.05f,s*.68f);drawAnimatedPick(d,s*.50f+punch,s*.20f,s,pickAngle(w),1);d.restore();}
     private float facing(Worker w){if(Math.abs(w.vx)>1)return w.vx<0?-1:1;if(w.vein!=null&&w.action==WorkerAction.MINE)return w.vein.x<w.x?-1:1;if(w.mob!=null)return w.mob.x<w.x?-1:1;return 1;}
 
-    private void drawMob(Draw d,Mob m){if(m.dead)return;float s=m.type.size*ui;switch(m.type){case IMP,IMP_KING->drawImp(d,m,s);case DEMON,DEMON_KING->drawDemon(d,m,s);default->drawGolem(d,m,s);}float pct=Math.max(0,m.hp/m.maxHp);if(pct<.999f||m.type.ordinal()>=EnemyType.IMP_KING.ordinal()){float bw=s*1.5f;d.setColor(0xCC120E0D);d.fillRoundRect(m.x-bw/2,m.y-s*.95f,m.x+bw/2,m.y-s*.84f,2f*ui);d.setColor(0xFFE34F43);d.fillRoundRect(m.x-bw/2,m.y-s*.95f,m.x-bw/2+bw*pct,m.y-s*.84f,2f*ui);}}
-    private void drawImp(Draw d,Mob m,float s){float hop=Math.abs((float)Math.sin(m.walkCycle+m.phase))*s*.10f;float flap=(float)Math.sin(elapsed*13f+m.phase);float steal=m.attack>0?(float)Math.sin((.42f-m.attack)/.42f*Math.PI):0;float dir=m.goalCell>=0&&cx(map.col(m.goalCell))<m.x?-1:1;d.save();d.translate(m.x,m.y-hop);d.scale(dir,1);if(m.type==EnemyType.IMP_KING){d.setColor(0x22FF4A32);d.fillCircle(0,0,s*.85f*(1+.07f*(float)Math.sin(elapsed*5)));}
-        d.setColor(adjust(m.type.color,.64f));d.pathReset();d.moveTo(-s*.20f,-s*.05f);d.lineTo(-s*(.57f+.10f*flap),-s*.35f);d.lineTo(-s*.42f,s*.12f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.20f,-s*.05f);d.lineTo(s*(.57f+.10f*flap),-s*.35f);d.lineTo(s*.42f,s*.12f);d.closePath();d.fillPath();
-        d.setColor(m.type.color);d.fillOval(-s*.30f,-s*.18f,s*.30f,s*.48f);d.fillCircle(0,-s*.30f,s*.28f);d.setColor(0xFFE8D2A8);d.pathReset();d.moveTo(-s*.22f,-s*.48f);d.lineTo(-s*.48f,-s*.72f);d.lineTo(-s*.09f,-s*.57f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.22f,-s*.48f);d.lineTo(s*.48f,-s*.72f);d.lineTo(s*.09f,-s*.57f);d.closePath();d.fillPath();d.setColor(0xFFFFE45C);d.fillOval(-s*.16f,-s*.36f,-s*.05f,-s*.29f);d.fillOval(s*.05f,-s*.36f,s*.16f,-s*.29f);
-        d.setColor(adjust(m.type.color,.78f));d.strokeWidth=s*.08f;d.line(-s*.12f,s*.39f,-s*.24f+(float)Math.sin(m.walkCycle)*s*.08f,s*.69f);d.line(s*.12f,s*.39f,s*.24f-(float)Math.sin(m.walkCycle)*s*.08f,s*.69f);d.line(s*.24f,s*.10f,s*(.54f+.18f*steal),s*.25f);
-        d.strokeWidth=s*.055f;d.line(-s*.28f,s*.24f,-s*.48f,s*.42f);d.line(-s*.48f,s*.42f,-s*.40f,s*.57f);if(m.type==EnemyType.IMP_KING)drawCrown(d,0,-s*.72f,s*.65f);d.restore();}
-    private void drawDemon(Draw d,Mob m,float s){float stride=(float)Math.sin(m.walkCycle+m.phase);float breath=(float)Math.sin(elapsed*3.2f+m.phase)*s*.025f;float slash=m.attack>0?(float)Math.sin((.40f-m.attack)/.40f*Math.PI):0;d.save();d.translate(m.x,m.y+breath);if(m.type==EnemyType.DEMON_KING){d.setColor(0x228A1F28);d.fillCircle(0,0,s*.90f*(1+.08f*(float)Math.sin(elapsed*4)));}
-        d.setColor(0x55000000);d.fillOval(-s*.48f,s*.58f,s*.48f,s*.73f);d.setColor(adjust(m.type.color,.72f));d.fillOval(-s*.36f,-s*.12f,s*.36f,s*.57f);d.setColor(m.type.color);d.fillCircle(0,-s*.37f,s*.32f);d.setColor(0xFFE5CF9D);d.pathReset();d.moveTo(-s*.25f,-s*.56f);d.lineTo(-s*.54f,-s*.82f);d.lineTo(-s*.10f,-s*.66f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.25f,-s*.56f);d.lineTo(s*.54f,-s*.82f);d.lineTo(s*.10f,-s*.66f);d.closePath();d.fillPath();d.setColor(0xFFFFD74F);d.fillCircle(-s*.13f,-s*.40f,s*.045f);d.fillCircle(s*.13f,-s*.40f,s*.045f);d.setColor(adjust(m.type.color,.55f));d.strokeWidth=s*.13f;d.line(-s*.18f,s*.50f,-s*.29f+stride*s*.07f,s*.79f);d.line(s*.18f,s*.50f,s*.29f-stride*s*.07f,s*.79f);d.line(-s*.32f,s*.03f,-s*(.62f+.18f*slash),s*(.18f-.22f*slash));d.line(s*.32f,s*.03f,s*.60f,s*.22f);if(m.type==EnemyType.DEMON_KING)drawCrown(d,0,-s*.82f,s*.70f);d.restore();}
+    private void drawMob(Draw d,Mob m){
+        if(m.dead)return;float s=m.type.size*ui,scale=appearScale(m.spawn,.65f);
+        if(m.spawn>0)drawArrivalRing(d,m.x,m.y,s*.82f,m.spawn,.65f,m.type.color);
+        if(m.spawn>0){d.save();d.translate(m.x,m.y);d.scale(scale,scale);d.translate(-m.x,-m.y);}
+        switch(m.type){case IMP,IMP_KING->drawImp(d,m,s);case DEMON,DEMON_KING->drawDemon(d,m,s);default->drawGolem(d,m,s);}
+        float pct=Math.max(0,m.hp/m.maxHp);if(pct<.999f||m.type.ordinal()>=EnemyType.IMP_KING.ordinal()){float bw=s*1.5f;d.setColor(0xCC120E0D);d.fillRoundRect(m.x-bw/2,m.y-s*.95f,m.x+bw/2,m.y-s*.84f,2f*ui);d.setColor(0xFFE34F43);d.fillRoundRect(m.x-bw/2,m.y-s*.95f,m.x-bw/2+bw*pct,m.y-s*.84f,2f*ui);}
+        if(m.spawn>0)d.restore();
+    }
+    private void drawImp(Draw d,Mob m,float s){
+        float hop=Math.abs((float)Math.sin(m.walkCycle+m.phase))*s*.11f,flap=(float)Math.sin(elapsed*13f+m.phase),steal=m.attack>0?(float)Math.sin((.42f-m.attack)/.42f*Math.PI):0;float dir=m.goalCell>=0&&cx(map.col(m.goalCell))<m.x?-1:1;
+        d.save();d.translate(m.x,m.y-hop);d.scale(dir,1);if(m.type==EnemyType.IMP_KING){d.setColor(0x22FF4A32);d.fillCircle(0,0,s*.92f*(1+.07f*(float)Math.sin(elapsed*5)));}
+        // leathery wings
+        d.setColor(adjust(m.type.color,.48f));d.pathReset();d.moveTo(-s*.18f,-s*.08f);d.lineTo(-s*(.65f+.10f*flap),-s*.44f);d.lineTo(-s*.50f,s*.02f);d.lineTo(-s*.30f,s*.20f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.18f,-s*.08f);d.lineTo(s*(.65f+.10f*flap),-s*.44f);d.lineTo(s*.50f,s*.02f);d.lineTo(s*.30f,s*.20f);d.closePath();d.fillPath();
+        // body/head
+        d.setColor(adjust(m.type.color,.78f));d.fillOval(-s*.29f,-s*.12f,s*.29f,s*.48f);d.setColor(m.type.color);d.fillCircle(0,-s*.32f,s*.30f);
+        // long ivory horns
+        d.setColor(0xFFF0D8A6);d.pathReset();d.moveTo(-s*.21f,-s*.51f);d.lineTo(-s*.55f,-s*.83f);d.lineTo(-s*.34f,-s*.48f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.21f,-s*.51f);d.lineTo(s*.55f,-s*.83f);d.lineTo(s*.34f,-s*.48f);d.closePath();d.fillPath();
+        d.setColor(0xFF17110F);d.fillOval(-s*.19f,-s*.40f,-s*.03f,-s*.29f);d.fillOval(s*.03f,-s*.40f,s*.19f,-s*.29f);d.setColor(0xFFFFE45C);d.fillCircle(-s*.10f,-s*.345f,s*.04f);d.fillCircle(s*.10f,-s*.345f,s*.04f);
+        // legs and greedy reaching arms
+        d.setColor(adjust(m.type.color,.57f));d.strokeWidth=s*.09f;float step=(float)Math.sin(m.walkCycle);d.line(-s*.12f,s*.40f,-s*.27f+step*s*.08f,s*.72f);d.line(s*.12f,s*.40f,s*.27f-step*s*.08f,s*.72f);d.line(s*.24f,s*.08f,s*(.60f+.20f*steal),s*(.19f-.08f*steal));d.line(-s*.24f,s*.08f,-s*.53f,s*.27f);
+        // hooked tail makes the thief silhouette unmistakable
+        d.strokeWidth=s*.055f;d.line(-s*.22f,s*.32f,-s*.52f,s*.48f);d.line(-s*.52f,s*.48f,-s*.68f,s*.31f);d.setColor(m.type.color);d.pathReset();d.moveTo(-s*.72f,s*.27f);d.lineTo(-s*.57f,s*.30f);d.lineTo(-s*.67f,s*.42f);d.closePath();d.fillPath();
+        if(m.type==EnemyType.IMP_KING)drawCrown(d,0,-s*.78f,s*.70f);d.restore();
+    }
+    private void drawDemon(Draw d,Mob m,float s){
+        float stride=(float)Math.sin(m.walkCycle+m.phase),breath=(float)Math.sin(elapsed*3.2f+m.phase)*s*.025f,slash=m.attack>0?(float)Math.sin((.40f-m.attack)/.40f*Math.PI):0;
+        d.save();d.translate(m.x,m.y+breath);if(m.type==EnemyType.DEMON_KING){d.setColor(0x288A1F28);d.fillCircle(0,0,s*.98f*(1+.08f*(float)Math.sin(elapsed*4)));}
+        d.setColor(0x55000000);d.fillOval(-s*.53f,s*.61f,s*.53f,s*.78f);
+        // folded black-red wings behind the torso
+        d.setColor(adjust(m.type.color,.42f));d.pathReset();d.moveTo(-s*.25f,-s*.06f);d.lineTo(-s*.68f,-s*.42f);d.lineTo(-s*.55f,s*.28f);d.lineTo(-s*.28f,s*.42f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.25f,-s*.06f);d.lineTo(s*.68f,-s*.42f);d.lineTo(s*.55f,s*.28f);d.lineTo(s*.28f,s*.42f);d.closePath();d.fillPath();
+        // broad armored torso
+        d.setColor(adjust(m.type.color,.66f));d.fillOval(-s*.39f,-s*.10f,s*.39f,s*.59f);d.setColor(adjust(m.type.color,.90f));d.fillRoundRect(-s*.30f,-s*.03f,s*.30f,s*.28f,s*.06f);d.setColor(0xFF311719);d.strokeWidth=s*.04f;d.line(-s*.23f,s*.02f,s*.23f,s*.21f);d.line(s*.23f,s*.02f,-s*.23f,s*.21f);
+        d.setColor(m.type.color);d.fillCircle(0,-s*.40f,s*.34f);
+        // swept horns
+        d.setColor(0xFFEAD3A2);d.pathReset();d.moveTo(-s*.24f,-s*.59f);d.lineTo(-s*.65f,-s*.88f);d.lineTo(-s*.47f,-s*.51f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.24f,-s*.59f);d.lineTo(s*.65f,-s*.88f);d.lineTo(s*.47f,-s*.51f);d.closePath();d.fillPath();
+        // eyes and mouth
+        d.setColor(0xFF140C0D);d.fillOval(-s*.20f,-s*.47f,-s*.04f,-s*.35f);d.fillOval(s*.04f,-s*.47f,s*.20f,-s*.35f);d.setColor(0xFFFFD447);d.fillCircle(-s*.12f,-s*.41f,s*.045f);d.fillCircle(s*.12f,-s*.41f,s*.045f);d.setColor(0xFF2A1112);d.fillRect(-s*.13f,-s*.26f,s*.13f,-s*.21f);
+        // legs, claw arm and a visible cleaver on attack side
+        d.setColor(adjust(m.type.color,.48f));d.strokeWidth=s*.14f;d.line(-s*.18f,s*.51f,-s*.31f+stride*s*.08f,s*.82f);d.line(s*.18f,s*.51f,s*.31f-stride*s*.08f,s*.82f);d.line(s*.32f,s*.04f,s*.61f,s*.25f);
+        float ax=-s*(.55f+.22f*slash),ay=s*(.13f-.24f*slash);d.line(-s*.32f,s*.04f,ax,ay);d.setColor(0xFF6D4B31);d.strokeWidth=s*.065f;d.line(ax,ay,ax-s*.18f,ay-s*.24f);d.setColor(0xFFC8D0D5);d.pathReset();d.moveTo(ax-s*.20f,ay-s*.28f);d.lineTo(ax-s*.43f,ay-s*.37f);d.lineTo(ax-s*.28f,ay-s*.10f);d.closePath();d.fillPath();
+        if(m.type==EnemyType.DEMON_KING)drawCrown(d,0,-s*.88f,s*.76f);d.restore();
+    }
     private void drawGolem(Draw d,Mob m,float s){float step=(float)Math.sin(m.walkCycle+m.phase),stomp=Math.abs(step)*s*.04f;float punch=m.attack>0?(float)Math.sin((.40f-m.attack)/.40f*Math.PI):0;int col=m.type.color;d.save();d.translate(m.x,m.y-stomp);if(m.type==EnemyType.ELEMENTAL_KING){float pulse=.75f+.25f*(float)Math.sin(elapsed*4);d.setColor(0x287F63D8);d.fillCircle(0,0,s*(.90f+.10f*pulse));}
-        d.setColor(0x66000000);d.fillOval(-s*.58f,s*.60f,s*.58f,s*.78f);d.setColor(adjust(col,.62f));d.fillRoundRect(-s*.37f,-s*.02f,s*.37f,s*.52f,s*.10f);d.setColor(col);d.fillCircle(0,-s*.39f,s*.32f);d.fillCircle(-s*.47f,s*.06f,s*.22f);d.fillCircle(s*(.47f+.18f*punch),s*(.06f-.12f*punch),s*.22f);d.setColor(adjust(col,.78f));d.fillCircle(-s*.20f,s*.40f,s*.18f);d.fillCircle(s*.20f,s*.40f,s*.18f);d.setColor(0xFFEAF6FF);d.fillCircle(-s*.12f,-s*.41f,s*.047f);d.fillCircle(s*.12f,-s*.41f,s*.047f);
+        d.setColor(0x66000000);d.fillOval(-s*.58f,s*.60f,s*.58f,s*.78f);d.setColor(adjust(col,.62f));d.fillRoundRect(-s*.37f,-s*.02f,s*.37f,s*.52f,s*.10f);d.setColor(adjust(col,.42f));d.fillCircle(0,s*.18f,s*.17f);d.setColor(adjust(col,1.42f));d.fillCircle(0,s*.18f,s*.095f);d.setColor(col);d.fillCircle(0,-s*.39f,s*.32f);d.fillCircle(-s*.47f,s*.06f,s*.22f);d.fillCircle(s*(.47f+.18f*punch),s*(.06f-.12f*punch),s*.22f);d.setColor(adjust(col,.78f));d.fillCircle(-s*.20f,s*.40f,s*.18f);d.fillCircle(s*.20f,s*.40f,s*.18f);d.setColor(0xFFEAF6FF);d.fillCircle(-s*.12f,-s*.41f,s*.047f);d.fillCircle(s*.12f,-s*.41f,s*.047f);
         if(m.type==EnemyType.FIRE_GOLEM||m.type==EnemyType.ELEMENTAL_KING){d.setColor(0xFFFFB12F);for(int i=0;i<3;i++){float a=elapsed*(3+i*.4f)+i*2.1f;d.fillCircle((float)Math.cos(a)*s*.28f,-s*.67f+(float)Math.sin(a)*s*.10f,(.05f+.02f*i)*s);}}
         if(m.type==EnemyType.WATER_GOLEM||m.type==EnemyType.ELEMENTAL_KING){d.setColor(0x664FC6F1);d.strokeWidth=s*.08f;float wave=(float)Math.sin(elapsed*5);d.line(-s*.34f,s*.15f,s*.34f,s*(.15f+.08f*wave));}
         if(m.type==EnemyType.STONE_GOLEM){d.setColor(0xFF4D4942);d.strokeWidth=s*.045f;d.line(-s*.20f,-s*.10f,s*.08f,s*.20f);d.line(s*.08f,s*.20f,s*.25f,s*.03f);}
@@ -772,10 +852,32 @@ public final class CaveScreen extends ScreenAdapter {
             switch(h.type){
                 case COLLAPSE -> drawCollapseHazard(d,h,warning);
                 case FLOOD -> drawFloodHazard(d,h,warning);
-                case PIT -> {d.setColor(0xDD020202);d.fillOval(h.x-h.r,h.y-h.r*.55f,h.x+h.r,h.y+h.r*.55f);d.setColor(0xFF514A42);d.strokeWidth=2f*ui;d.strokeCircle(h.x,h.y,h.r*.75f);}
-                case LAVA -> {float warn=h.age<1.25f?.35f+.20f*(float)Math.sin(h.age*16f):.70f;d.setColor(alpha(0xFFFF5625,warn));d.fillOval(h.x-h.r,h.y-h.r*.45f,h.x+h.r,h.y+h.r*.45f);d.setColor(0xFFFFC13B);for(int i=0;i<4;i++){float a=elapsed*(1+i*.12f)+i;d.fillCircle(h.x+(float)Math.cos(a)*h.r*.55f,h.y+(float)Math.sin(a*1.4f)*h.r*.24f,(2.5f+i%2*1.5f)*ui);}}
+                case PIT -> drawPitHazard(d,h,warning);
+                case LAVA -> drawLavaHazard(d,h,warning);
             }
         }
+    }
+
+    private void drawPitHazard(Draw d,CaveHazard h,float warning){
+        float pulse=.5f+.5f*(float)Math.sin(h.age*8f);
+        d.setColor(0xFF514A42);for(int i=0;i<11;i++){float a=i*.571f+h.cell*.13f,rr=h.r*(.75f+.09f*(i%3));d.fillCircle(h.x+(float)Math.cos(a)*rr,h.y+(float)Math.sin(a)*rr*.55f,(3.5f+i%3*1.2f)*ui);}
+        d.setColor(0xEE020202);d.fillOval(h.x-h.r*.80f,h.y-h.r*.42f,h.x+h.r*.80f,h.y+h.r*.43f);d.setColor(0xFF171411);d.fillOval(h.x-h.r*.55f,h.y-h.r*.27f,h.x+h.r*.55f,h.y+h.r*.31f);
+        if(h.age<1.25f){d.setColor(alpha(0xFFE7D6B9,.35f+.35f*pulse));d.strokeWidth=(1.2f+warning)*ui;d.strokeCircle(h.x,h.y,h.r*(.70f+.06f*pulse));}
+    }
+
+    private void drawLavaHazard(Draw d,CaveHazard h,float warning){
+        float t=Math.max(0,h.age-1.25f),pulse=.5f+.5f*(float)Math.sin(elapsed*5.2f+h.cell);
+        // Before ignition it is cracked rock glowing from underneath, not a mysterious red stain.
+        d.setColor(0xFF171311);d.fillOval(h.x-h.r*.93f,h.y-h.r*.52f,h.x+h.r*.93f,h.y+h.r*.53f);
+        for(int i=0;i<7;i++){
+            float a=i*.897f+h.cell*.19f,inner=h.r*.12f,outer=h.r*(.54f+.08f*(i%3));float x1=h.x+(float)Math.cos(a)*inner,y1=h.y+(float)Math.sin(a)*inner*.52f,x2=h.x+(float)Math.cos(a)*outer,y2=h.y+(float)Math.sin(a)*outer*.52f;
+            d.setColor(alpha(0xFFFF5B24,h.age<1.25f?.28f+.48f*warning:.72f));d.strokeWidth=(2.7f+(i%2))*ui;d.line(x1,y1,x2,y2);d.setColor(alpha(0xFFFFD35A,h.age<1.25f?.18f+.48f*warning:.82f));d.strokeWidth=1.1f*ui;d.line(x1,y1,x2,y2);
+        }
+        if(h.age<1.25f)return;
+        // Irregular molten pool with bright center and moving bubbles.
+        d.setColor(0xCC7B1E13);d.pathReset();int n=12;for(int i=0;i<n;i++){float a=(float)(Math.PI*2*i/n),sc=.68f+hash01(h.cell*997L+i*83L)*.22f;float x=h.x+(float)Math.cos(a)*h.r*sc,y=h.y+(float)Math.sin(a)*h.r*sc*.48f;if(i==0)d.moveTo(x,y);else d.lineTo(x,y);}d.closePath();d.fillPath();
+        d.setColor(0xFFFF5725);d.fillOval(h.x-h.r*.57f,h.y-h.r*.25f,h.x+h.r*.57f,h.y+h.r*.27f);d.setColor(alpha(0xFFFFB52F,.72f+.22f*pulse));d.fillOval(h.x-h.r*.36f,h.y-h.r*.15f,h.x+h.r*.36f,h.y+h.r*.17f);d.setColor(0xFFFFE07A);d.fillOval(h.x-h.r*.18f,h.y-h.r*.07f,h.x+h.r*.18f,h.y+h.r*.09f);
+        for(int i=0;i<5;i++){float a=i*1.31f+h.cell*.07f,cycle=(t*(.7f+i*.09f)+i*.23f)%1f;float x=h.x+(float)Math.cos(a)*h.r*(.12f+.42f*cycle),y=h.y+(float)Math.sin(a*1.7f)*h.r*.16f;float rr=(1.5f+cycle*3f)*ui;d.setColor(cycle>.72f?0x55FFE89A:0xFFFF9D32);d.strokeWidth=1.2f*ui;d.strokeCircle(x,y,rr);}
     }
 
     private void drawCollapseHazard(Draw d,CaveHazard h,float warning){
@@ -795,6 +897,7 @@ public final class CaveScreen extends ScreenAdapter {
             if(i%4==0){d.setColor(0xFF9A8A78);d.strokeWidth=1.2f*ui;d.line(x-sz*.7f,y-sz*.2f,x+sz*.6f,y+sz*.25f);}
         }
         d.setColor(0x668F8173);for(int i=0;i<7;i++){float drift=(h.age*13f+i*17f)%38f;d.fillCircle(h.x+(i-3)*h.r*.15f,h.y-h.r*.10f-drift*ui,(2f+i%3)*ui*(1-Math.min(.85f,(h.age-1.25f)/10f)));}
+        if(h.rubbleMaxHp>0&&!h.cleared){float pct=Math.max(0,h.rubbleHp/h.rubbleMaxHp),bw=h.r*1.28f,by=h.y-h.r*.72f;d.setColor(0xCC0F0D0C);d.fillRoundRect(h.x-bw/2,by,h.x+bw/2,by+5f*ui,2f*ui);d.setColor(0xFFBA8A54);d.fillRoundRect(h.x-bw/2,by,h.x-bw/2+bw*pct,by+5f*ui,2f*ui);}
     }
 
     private void drawFloodHazard(Draw d,CaveHazard h,float warning){
@@ -817,7 +920,7 @@ public final class CaveScreen extends ScreenAdapter {
 
     private void drawFx(Draw d,Fx p){float a=Math.max(0,p.life/p.maxLife);d.setColor(alpha(p.color,a));if(p.spark){d.strokeWidth=Math.max(1f,p.size*.6f);d.line(p.x,p.y,p.x-p.vx*.025f,p.y-p.vy*.025f);}else d.fillCircle(p.x,p.y,p.size*(.45f+.55f*a));}
     private void drawAtmosphere(Draw d){
-        for(int i=0;i<18;i++){float x=((i*73.3f+elapsed*(3+i%4))*ui)%(width+20f*ui)-10f*ui;float y=worldT+((i*119.7f+state.depth*31)%1000)/1000f*(worldB-worldT);d.setColor(0x18D7C7AB);d.fillCircle(x,y,(.7f+i%3*.45f)*ui);}
+        int dust=workers.size()>90?7:18;for(int i=0;i<dust;i++){float x=((i*73.3f+elapsed*(3+i%4))*ui)%(width+20f*ui)-10f*ui;float y=worldT+((i*119.7f+state.depth*31)%1000)/1000f*(worldB-worldT);d.setColor(0x18D7C7AB);d.fillCircle(x,y,(.7f+i%3*.45f)*ui);}
         d.setColor(0x66000000);d.fillRect(worldL,worldT,worldR,worldT+7f*ui);d.fillRect(worldL,worldB-8f*ui,worldR,worldB);
     }
 
@@ -845,8 +948,8 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private float contentTop(){return tabs[0].b+5f*ui;}
-    private void drawGnomePanel(Draw d){GnomeTier gt=GnomeTier.values()[selectedTier];float ct=contentTop();button(d,left,"‹",selectedTier>0,1.15f);button(d,right,"›",selectedTier<GnomeTier.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=11f*ui;d.setColor(gt.color);d.text(gt.title,width/2,ct+18f*ui);d.bold=false;d.textSize=8.6f*ui;d.setColor(0xFFB6C0C8);d.text("×"+state.tierCounts[selectedTier]+"   ур. "+state.tierLevels[selectedTier]+"   добыча "+one.format(gt.miningPower*state.tierPowerMultiplier(selectedTier)),width/2,ct+37f*ui);d.align=Draw.Align.LEFT;
-        if(selectedTier==0)button(d,primary,"КУПИТЬ • "+format(state.minerBuyCost()),true,.72f);else button(d,primary,"ЭТОТ ТИП",false,.72f);button(d,secondary,"УЛУЧШИТЬ • "+format(state.tierUpgradeCost(selectedTier)),true,.70f);button(d,tertiary,"СЛИТЬ 10 → 1",selectedTier<GnomeTier.values().length-1&&state.tierCounts[selectedTier]>=10,.68f);button(d,quaternary,"ГРУЗ "+format((long)(gt.cargoCapacity*state.carryMultiplier(selectedTier))),false,.66f);}
+    private void drawGnomePanel(Draw d){GnomeTier gt=GnomeTier.values()[selectedTier];float ct=contentTop();button(d,left,"‹",selectedTier>0,1.15f);button(d,right,"›",selectedTier<GnomeTier.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=11f*ui;d.setColor(gt.color);d.text(gt.title,width/2,ct+18f*ui);d.bold=false;d.textSize=8.3f*ui;d.setColor(0xFFB6C0C8);d.text("×"+state.tierCounts[selectedTier]+"   ур. "+state.tierLevels[selectedTier]+"   добыча "+one.format(gt.miningPower*state.tierPowerMultiplier(selectedTier)),width/2,ct+37f*ui);d.align=Draw.Align.LEFT;
+        if(selectedTier==0)button(d,primary,"КУПИТЬ • "+format(state.minerBuyCost()),true,.72f);else button(d,primary,"ЭТОТ ТИП",false,.72f);button(d,secondary,"УЛУЧШИТЬ • "+format(state.tierUpgradeCost(selectedTier)),true,.70f);button(d,tertiary,"СЛИТЬ 10 → 1",selectedTier<GnomeTier.values().length-1&&state.tierCounts[selectedTier]>=10,.68f);statPill(d,quaternary,"СУМКА • вместимость "+format((long)(gt.cargoCapacity*state.carryMultiplier(selectedTier))));}
     private void drawUpgradePanel(Draw d){float ct=contentTop();d.align=Draw.Align.CENTER;d.bold=true;d.textSize=10.5f*ui;d.setColor(0xFFF0F3F5);d.text("ШАХТА И ИНФРАСТРУКТУРА",width/2,ct+18f*ui);d.bold=false;d.align=Draw.Align.LEFT;button(d,primary,"КИРКИ ур."+state.miningUpgrade,true,.70f);button(d,secondary,"ЛОГИСТИКА ур."+state.speedUpgrade,true,.66f);button(d,tertiary,"БОЙ ур."+state.combatUpgrade,true,.70f);button(d,quaternary,state.guardianLevel==0?"НАНЯТЬ СТРАЖА":"СТРАЖ ур."+state.guardianLevel,true,.66f);}
     private void drawArtifactPanel(Draw d){ArtifactType a=ArtifactType.values()[selectedArtifact];float ct=contentTop();button(d,left,"‹",selectedArtifact>0,1.15f);button(d,right,"›",selectedArtifact<ArtifactType.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=10.5f*ui;d.setColor(a.color);d.text(a.title,width/2,ct+18f*ui);d.bold=false;d.textSize=8.5f*ui;d.setColor(0xFFB5BFC7);d.text(a.description+" • ур. "+state.artifactLevels[selectedArtifact],width/2,ct+37f*ui);d.align=Draw.Align.LEFT;button(d,primary,"УСИЛИТЬ • ◆"+state.artifactCost(selectedArtifact),true,.72f);button(d,secondary,"ПОСТОЯННЫЙ ЭФФЕКТ",false,.60f);button(d,tertiary,"РУНА: "+runeName(state.artifactRunes[selectedArtifact]),false,.60f);button(d,quaternary,"",false,.60f);}
     private void drawRunePanel(Draw d){RuneType r=RuneType.values()[selectedRune];float ct=contentTop();button(d,left,"‹",selectedRune>0,1.15f);button(d,right,"›",selectedRune<RuneType.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=10.5f*ui;d.setColor(r.color);d.text(r.title,width/2,ct+18f*ui);d.bold=false;d.textSize=8.2f*ui;d.setColor(0xFFB7C0C7);d.text(r.description+" • ур. "+state.runeLevels[selectedRune],width/2,ct+37f*ui);d.align=Draw.Align.LEFT;button(d,primary,"УСИЛИТЬ • ◆"+state.runeUpgradeCost(selectedRune),true,.68f);button(d,secondary,"ЦЕЛЬ ›",true,.68f);button(d,tertiary,ellipsize(state.runeTargetTitle(runeTarget),19),false,.58f);button(d,quaternary,state.runeAtTarget(runeTarget)==selectedRune?"СНЯТЬ РУНУ":"НАНЕСТИ РУНУ",state.runeLevels[selectedRune]>0,.62f);}
@@ -855,6 +958,7 @@ public final class CaveScreen extends ScreenAdapter {
         int accent=b==speed?UiTheme.GOLD:(b==back?UiTheme.STEEL:UiTheme.COPPER);
         UiTheme.button(d,b.l,b.t,b.r,b.b,ui,text,enabled,accent,b==speed&&speedHeld,scale);
     }
+    private void statPill(Draw d,Box b,String text){d.setColor(0x66191D20);d.fillRoundRect(b.l,b.t,b.r,b.b,7f*ui);d.setColor(0xFF252B30);d.fillRoundRect(b.l+1f*ui,b.t+1f*ui,b.r-1f*ui,b.b-1f*ui,6f*ui);d.align=Draw.Align.CENTER;d.bold=false;d.textSize=7.2f*ui;d.setColor(0xFF9FAAAF);d.text(text,b.cx(),b.cy()+2.5f*ui);d.align=Draw.Align.LEFT;}
     private void drawToast(Draw d){if(toastTime<=0)return;float a=Math.min(1,toastTime*2);float w=Math.min(width-40f*ui,280f*ui);d.setColor(alpha(0xDD101316,a));d.fillRoundRect((width-w)/2,worldT+10f*ui,(width+w)/2,worldT+42f*ui,9f*ui);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=9.5f*ui;d.setColor(alpha(0xFFF2F4F5,a));d.text(toast,width/2,worldT+30f*ui);d.align=Draw.Align.LEFT;d.bold=false;}
 
     private boolean handleTap(float x,float y){
