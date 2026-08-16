@@ -1,0 +1,4 @@
+allprojects {
+    group = 'com.enhort.gnomes'
+    version = '0.1.0'
+}

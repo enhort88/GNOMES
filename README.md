@@ -37,34 +37,37 @@
 ## Технологии
 
 - Java 17 (исходники)
+- libGDX 1.14.2, модули `core` + `lwjgl3` + `android` — как у DOT
 - Gradle 9.5.0 + Android Gradle Plugin 9.3.1
-- Daemon JVM 25 через `gradle/gradle-daemon-jvm.properties` — та же схема, что у DOT на Ubuntu / Android Studio (JBR 25)
+- Daemon JVM 25 через `gradle/gradle-daemon-jvm.properties`
 - Android SDK 36
-- Custom `View` + `Canvas`
-- Без внешнего игрового движка и без внешних ассетов на данном этапе
 
 Персонажи, техника, враги, сундук, руны, камни и эффекты сейчас рисуются программно. Это позволяет быстро менять размеры, анимации и механику, не переделывая набор спрайтов на каждом раннем тесте.
 
-## Запуск в Android Studio
+## Запуск на Ubuntu (как DOT)
 
-1. Открыть папку `Gnomes` как проект.
-2. Убедиться, что установлен Android SDK 36. Отдельный системный JDK 17 не обязателен: Gradle сам берёт JVM 25 по toolchain.
-3. Дождаться Gradle Sync. В Run Configuration должен появиться модуль `app` и подключённый телефон.
-4. Запустить конфигурацию `app`.
-
-В проекте есть bootstrap-скрипт `gradlew`. При первом запуске он скачивает Gradle 9.5.0 в `~/.gradle/gnomes-bootstrap/9.5.0`, поэтому отдельная установка Gradle не требуется. Нужны `curl` или `wget` и `unzip`.
-
-Сборка из терминала:
+Десктоп без Android SDK:
 
 ```bash
-./gradlew assembleDebug
+./gradlew -PskipAndroid :lwjgl3:run
 ```
 
-APK после сборки:
+## Запуск на телефоне
+
+```bash
+./gradlew :android:assembleDebug
+./gradlew :android:installDebug
+```
+
+APK:
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+android/build/outputs/apk/debug/android-debug.apk
 ```
+
+В Android Studio открыть папку `Gnomes`, дождаться Gradle Sync и выбрать конфигурацию `android` плюс подключённый телефон.
+
+В проекте есть bootstrap-скрипт `gradlew`. При первом запуске он скачивает Gradle 9.5.0 в `~/.gradle/gnomes-bootstrap/9.5.0`. Нужны `curl` или `wget` и `unzip`. Daemon JVM 25 задаётся в `gradle/gradle-daemon-jvm.properties` — та же схема, что у DOT.
 
 ## Что логично делать следующим проходом
 
