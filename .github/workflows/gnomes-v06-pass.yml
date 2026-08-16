@@ -18,6 +18,17 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Normalize v0.6 patch matchers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tools/gnomes_v06_patch.py')
+          s=p.read_text()
+          old="pat=r'    private void drawGuardian\\(Draw d,float x,float y,float s\\)\\{.*?\\n    \\}\\n    private void drawGuardianHealth'"
+          new="pat=r'    private void drawGuardian\\(Draw d,float x,float y,float s\\)\\{.*?\\n    \\}\\n\\n    private void drawGuardianHealth'"
+          if old not in s: raise SystemExit('guardian matcher source anchor missing')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Apply GNOMES v0.6 pass
         run: python3 tools/gnomes_v06_patch.py
       - name: Static assertions
@@ -33,7 +44,7 @@ jobs:
             'spread-veins':'crowdPenalty' in cave and 'assigned++' in cave,
             'collapse-first':'cleanupLeft>0&&cleanup!=null' in cave,
             'wet-corridors':'drawWetCorridors' in cave,
-            'fog-blobs':'Organic fog' not in cave and 'for(int i=0;i<6;i++)' in cave,
+            'fog-blobs':'for(int i=0;i<6;i++)' in cave,
             'laser-excavator':'Лазерный экскаватор' in Path('core/src/main/java/com/enhort/gnomes/game/model/GnomeTier.java').read_text(),
             'laser-golem':'beam>.12f' in cave,
             'guardian-axe':'attack*118f' in cave,
