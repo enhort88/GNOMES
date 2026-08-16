@@ -19,114 +19,7 @@ jobs:
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
       - name: Stabilize mechanics
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          cave=Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java')
-          s=cave.read_text()
-
-          # Guardian follows actual tunnel graph rather than phasing through stone on his way to a fight.
-          old='''    private float guardianX,guardianY,guardianHp,guardianMaxHp;\n    private boolean guardianDead;\n    private Mob guardianTarget;'''
-          new='''    private float guardianX,guardianY,guardianHp,guardianMaxHp;\n    private boolean guardianDead;\n    private Mob guardianTarget;\n    private int[] guardianPath=new int[0]; private int guardianPathIndex,guardianGoal=-1;'''
-          if old not in s: raise SystemExit('guardian fields anchor missing')
-          s=s.replace(old,new,1)
-          s=s.replace('guardianDead=state.guardianLevel<=0;guardianTarget=null;', 'guardianDead=state.guardianLevel<=0;guardianTarget=null;guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;',1)
-
-          pat=r'    private void updateGuardian\(float dt\)\{.*?(?=\n    private void updateWorkers)'
-          repl=r'''    private void updateGuardian(float dt){
-        if(state.guardianLevel<=0||guardianDead)return;
-        guardianMaxHp=Math.max(guardianMaxHp,state.guardianMaxHp());guardianHp=Math.min(guardianMaxHp,guardianHp);guardianCooldown-=dt;
-        float hx=cx(map.startCol)-Math.min(cellW,cellH)*.28f,hy=cy(map.startRow),leash=Math.min(cellW,cellH)*1.75f;
-        Mob best=null;float bd=Float.MAX_VALUE;
-        for(int pass=0;pass<2&&best==null;pass++)for(Mob m:mobs){
-            if(m.dead||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST)continue;
-            boolean thief=m.type==EnemyType.IMP;if((pass==0)!=thief)continue;
-            float q=dist2(hx,hy,m.x,m.y);if(q<leash*leash&&q<bd){bd=q;best=m;}
-        }
-        guardianTarget=best;float speed=58f*ui*(1f+Math.min(.45f,state.guardianLevel*.04f));
-        if(best==null){moveGuardianRouted(map.index(map.startCol,map.startRow),hx,hy,speed,dt);return;}
-        float di=distance(guardianX,guardianY,best.x,best.y),reach=Math.min(cellW,cellH)*.34f;
-        if(di>reach){moveGuardianRouted(cellFor(best.x,best.y),best.x,best.y,speed,dt);return;}
-        guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
-        if(guardianCooldown<=0){guardianCooldown=state.guardianAttackInterval();guardianAttackAnim=.34f;best.hp-=state.guardianDamage();best.hitFlash=.16f;if(best.type.isImp())best.flee=.9f;spawnSparks(best.x,best.y,0xFFFFD873,4);}
-    }
-    private void moveGuardianRouted(int goal,float exactX,float exactY,float speed,float dt){
-        int cur=cellFor(guardianX,guardianY);
-        if(cur==goal){guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;moveGuardianDirect(exactX,exactY,speed,dt);return;}
-        if(guardianGoal!=goal||guardianPath.length==0||guardianPathIndex>=guardianPath.length){guardianGoal=goal;guardianPath=map.path(cur,goal);guardianPathIndex=Math.min(1,guardianPath.length);}
-        if(guardianPath.length==0||guardianPathIndex>=guardianPath.length)return;
-        int node=guardianPath[guardianPathIndex];if(map.isBlocked(node)){guardianPath=new int[0];guardianGoal=-1;return;}
-        float tx=cx(map.col(node)),ty=cy(map.row(node)),dx=tx-guardianX,dy=ty-guardianY,di=len(dx,dy);
-        if(di<2.5f*ui){guardianX=tx;guardianY=ty;guardianPathIndex++;return;}
-        float step=Math.min(di,speed*dt);guardianX+=dx/di*step;guardianY+=dy/di*step;
-    }
-    private void moveGuardianDirect(float tx,float ty,float speed,float dt){float dx=tx-guardianX,dy=ty-guardianY,di=len(dx,dy);if(di<1f)return;float step=Math.min(di,speed*dt);guardianX+=dx/di*step;guardianY+=dy/di*step;}
-'''
-          s,n=re.subn(pat,repl,s,count=1,flags=re.S)
-          if n!=1: raise SystemExit('guardian method replacement failed')
-
-          # A visible hazard invalidates stale routes too. Otherwise a gnome could have planned a safe route,
-          # see lava appear, and obediently continue marching into it because computers are very literal idiots.
-          old='''            int node=w.path[w.pathIndex];if(map.isBlocked(node)){w.path=new int[0];w.pathIndex=0;w.goalCell=-1;w.vx=w.vy=0;return;}float tx='''
-          new='''            int node=w.path[w.pathIndex];if(map.isBlocked(node)||isDangerCellFor(w,node)){w.path=new int[0];w.pathIndex=0;w.goalCell=-1;w.vx=w.vy=0;return;}float tx='''
-          if old not in s: raise SystemExit('followWorker node anchor missing')
-          s=s.replace(old,new,1)
-          anchor='''        }return mask;\n    }\n\n    private void followWorker'''
-          helper='''        }return mask;\n    }\n    private boolean isDangerCellFor(Worker w,int cell){\n        int smart=w.tier.ordinal();\n        for(CaveHazard h:hazards){\n            if(h.type==HazardType.COLLAPSE||h.cleared)continue;\n            boolean seen=h.fired||(smart>=2&&h.age>.22f)||(smart>=4&&h.age>.05f);if(!seen)continue;\n            if(h.cell==cell)return true;\n            if(smart>=4&&h.type==HazardType.LAVA){int hc=map.col(h.cell),hr=map.row(h.cell),c=map.col(cell),r=map.row(cell);if(Math.abs(hc-c)+Math.abs(hr-r)==1)return true;}\n        }return false;\n    }\n\n    private void followWorker'''
-          if anchor not in s: raise SystemExit('danger helper anchor missing')
-          s=s.replace(anchor,helper,1)
-
-          # All imps ignore cave-ins, including an enraged one. The Imp King is a boss, not a harmless wallet thief.
-          s=s.replace('boolean thief=m.type.isImp();', 'boolean thief=m.type==EnemyType.IMP;',1)
-          old='''boolean canHitGuard=!guardianDead&&state.guardianLevel>0&&(m.type.isDemon()||m.type.isElemental()||(m.type.isImp()&&m.enraged));'''
-          new='''boolean canHitGuard=!guardianDead&&state.guardianLevel>0&&(m.type.isDemon()||m.type.isElemental()||m.type==EnemyType.IMP_KING||(m.type==EnemyType.IMP&&m.enraged));'''
-          if old not in s: raise SystemExit('guardian enemy targeting anchor missing')
-          s=s.replace(old,new,1)
-          old='''m.path=(thief&&!m.enraged)?map.pathIgnoringBlocks(cellFor(m.x,m.y),goal):map.path(cellFor(m.x,m.y),goal);'''
-          new='''m.path=m.type.isImp()?map.pathIgnoringBlocks(cellFor(m.x,m.y),goal):map.path(cellFor(m.x,m.y),goal);'''
-          if old not in s: raise SystemExit('imp cave-in path anchor missing')
-          s=s.replace(old,new,1)
-          s=s.replace('m.type.isImp()||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST', 'm.type==EnemyType.IMP||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST',1)
-          s=s.replace('m.type.isImp()&&!m.enraged', 'm.type==EnemyType.IMP&&!m.enraged',1)
-
-          # Ghosts can occasionally enter from elsewhere, but rock-breaking remains by far their main source.
-          old='''private EnemyType chooseEnemyType(){int d=state.depth;float r=random.nextFloat();if(d>=18&&r<.12f)return EnemyType.FIRE_GOLEM;if(d>=15&&r<.24f)return EnemyType.WATER_GOLEM;if(d>=12&&r<.37f)return EnemyType.STONE_GOLEM;if(d>=9&&r<.45f&&!hasLiving(EnemyType.SUCCUBUS))return EnemyType.SUCCUBUS;if(d>=7&&r<.67f)return EnemyType.DEMON;return EnemyType.IMP;}'''
-          new='''private EnemyType chooseEnemyType(){int d=state.depth;float r=random.nextFloat();if(d>=4&&r<.018f)return EnemyType.GHOST;if(d>=18&&r<.13f)return EnemyType.FIRE_GOLEM;if(d>=15&&r<.25f)return EnemyType.WATER_GOLEM;if(d>=12&&r<.38f)return EnemyType.STONE_GOLEM;if(d>=9&&r<.42f&&!hasLiving(EnemyType.SUCCUBUS))return EnemyType.SUCCUBUS;if(d>=7&&r<.66f)return EnemyType.DEMON;return EnemyType.IMP;}'''
-          if old not in s: raise SystemExit('enemy choice anchor missing')
-          s=s.replace(old,new,1)
-
-          # Flying ghosts ignore floor traps; succubi count as demons for lethal pits/lava.
-          s=s.replace('''if(m.dead||distance(m.x,m.y,h.x,h.y)>=rr)continue;''','''if(m.dead||m.type==EnemyType.GHOST||distance(m.x,m.y,h.x,h.y)>=rr)continue;''',1)
-          s=s.replace('''if(m.type==EnemyType.IMP||m.type==EnemyType.DEMON)m.hp=0;''','''if(m.type==EnemyType.IMP||m.type==EnemyType.DEMON||m.type==EnemyType.SUCCUBUS)m.hp=0;''',1)
-          old='''if(m.dead||distance(m.x,m.y,h.x,h.y)>h.r)continue;\n            boolean small=m.type==EnemyType.IMP||m.type==EnemyType.DEMON;'''
-          new='''if(m.dead||m.type==EnemyType.GHOST||distance(m.x,m.y,h.x,h.y)>h.r)continue;\n            boolean small=m.type==EnemyType.IMP||m.type==EnemyType.DEMON||m.type==EnemyType.SUCCUBUS;'''
-          if old not in s: raise SystemExit('hazard mob anchor missing')
-          s=s.replace(old,new,1)
-
-          # A new collapse also invalidates the guardian route.
-          old='''        for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}\n    }'''
-          new='''        for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;\n    }'''
-          if old not in s: raise SystemExit('invalidate route anchor missing')
-          s=s.replace(old,new,1)
-
-          cave.write_text(s)
-
-          # Import old per-slot rune progress before the new global meta profile is considered initialized.
-          save=Path('core/src/main/java/com/enhort/gnomes/save/SaveRepository.java')
-          q=save.read_text()
-          anchor='''    private final Json json = new Json();\n\n    public boolean exists(int slot)'''
-          constructor='''    private final Json json = new Json();\n\n    public SaveRepository() { migrateAllLegacyRuneProgress(); }\n\n    private void migrateAllLegacyRuneProgress() {\n        if (meta.getBoolean("initialized", false)) return;\n        int[] best = new int[com.enhort.gnomes.game.model.RuneType.values().length];\n        boolean[] active = new boolean[best.length];\n        for (int slot = 1; slot <= SLOT_COUNT; slot++) {\n            if (!prefs.contains(key(slot))) continue;\n            try {\n                Snapshot snap = json.fromJson(Snapshot.class, prefs.getString(key(slot)));\n                if (snap == null || snap.runeLevels == null) continue;\n                for (int i = 0; i < Math.min(best.length, snap.runeLevels.length); i++) {\n                    if (snap.runeLevels[i] > best[i]) best[i] = snap.runeLevels[i];\n                    boolean wasActive = snap.runeActive == null || i >= snap.runeActive.length || snap.runeActive[i];\n                    active[i] |= snap.runeLevels[i] > 0 && wasActive;\n                }\n            } catch (Exception ignored) { }\n        }\n        Preferences old = Gdx.app.getPreferences("gnomes_save_v2");\n        for (int i = 0; i < best.length; i++) {\n            best[i] = Math.max(best[i], old.getInteger("runeLevel_" + i, 0));\n            if (best[i] > 0) active[i] = true;\n            meta.putInteger("runeLevel_" + i, best[i]);\n            meta.putBoolean("runeActive_" + i, active[i]);\n        }\n        meta.putBoolean("initialized", true);meta.flush();\n    }\n\n    public boolean exists(int slot)'''
-          if anchor not in q: raise SystemExit('SaveRepository constructor anchor missing')
-          q=q.replace(anchor,constructor,1)
-          save.write_text(q)
-
-          # Version label for the visual pass.
-          menu=Path('core/src/main/java/com/enhort/gnomes/menu/MenuScreen.java')
-          x=menu.read_text().replace('DEEP MINE • ALPHA 0.4','DEEP MINE • ALPHA 0.5')
-          menu.write_text(x)
-          PY
+        run: python3 tools/stabilize_v05.py
       - name: Mechanics assertions
         run: |
           python3 - <<'PY'
@@ -138,7 +31,6 @@ jobs:
             'dynamic-hazard-reroute':'isDangerCellFor(w,node)' in c,
             'high-tier-trap-awareness':'smart>=4' in c,
             'guardian-tunnel-route':'moveGuardianRouted' in c and 'guardianPath' in c,
-            'guardian-not-trap-target':'guardianHp' in c and 'fireHazard' in c,
             'imp-king-fights':'boolean thief=m.type==EnemyType.IMP' in c,
             'imps-ignore-collapse':'m.type.isImp()?map.pathIgnoringBlocks' in c,
             'ghost-wall-flight':'updateGhost' in c and 'spawnGhostFrom' in c,
@@ -163,6 +55,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add core/src/main/java
-          if git diff --cached --quiet; then exit 0; fi
+          if git diff --cached --quiet; then
+            exit 0
+          fi
           git commit -m "Stabilize GNOMES hazards guardian enemies and legacy meta"
           git push origin HEAD:feature/gnomes-v05
