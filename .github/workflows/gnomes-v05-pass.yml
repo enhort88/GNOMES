@@ -35,7 +35,13 @@ jobs:
           a=s.index('s = replace_once(s,', s.index(marker))
           b=s.index("new_visuals = r'''", a)
           replacement="""s = sub_once(s, r'    private void drawMob\\(Draw d,Mob m\\)\\{.*?(?=\\n    private void drawImp)', r'''    private void drawMob(Draw d,Mob m){\n        if(m.dead)return;float sz=m.type.size*ui,scale=appearScale(m.spawn,.65f);\n        if(m.spawn>0)drawArrivalRing(d,m.x,m.y,sz*.82f,m.spawn,.65f,m.type.color);\n        if(m.spawn>0){d.save();d.translate(m.x,m.y);d.scale(scale,scale);d.translate(-m.x,-m.y);}\n        switch(m.type){case IMP,IMP_KING->drawImp(d,m,sz);case DEMON,DEMON_KING->drawDemon(d,m,sz);case SUCCUBUS->drawSuccubus(d,m,sz);case GHOST->drawGhost(d,m,sz);default->drawGolem(d,m,sz);}\n        float pct=Math.max(0,m.hp/m.maxHp);if(pct<.999f||m.type.isBoss()){float bw=sz*1.5f;d.setColor(0xCC120E0D);d.fillRoundRect(m.x-bw/2,m.y-sz*.95f,m.x+bw/2,m.y-sz*.84f,2f*ui);d.setColor(0xFFE34F43);d.fillRoundRect(m.x-bw/2,m.y-sz*.95f,m.x-bw/2+bw*pct,m.y-sz*.84f,2f*ui);}\n        if(m.spawn>0)d.restore();\n    }\n''', 'mob visual switch')\n"""
-          p.write_text(s[:a]+replacement+s[b:])
+          s=s[:a]+replacement+s[b:]
+          bad="mask[map.index(nc,nr)]=true;}}}\n        }return mask;"
+          good="mask[map.index(nc,nr)]=true;}}\n        }return mask;"
+          if bad not in s:
+              raise SystemExit('danger mask brace pattern missing')
+          s=s.replace(bad,good,1)
+          p.write_text(s)
           PY
       - name: Apply GNOMES v0.5 pass
         run: python3 tools/gnomes_v05_pass.py
