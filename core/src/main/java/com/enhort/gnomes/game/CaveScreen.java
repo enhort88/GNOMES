@@ -132,6 +132,7 @@ public final class CaveScreen extends ScreenAdapter {
     private float guardianX,guardianY,guardianHp,guardianMaxHp;
     private boolean guardianDead;
     private Mob guardianTarget;
+    private int[] guardianPath=new int[0]; private int guardianPathIndex,guardianGoal=-1;
     private long summaryEarned,summaryInvested,summaryWallet,summaryCapital,summaryTransfer;
     private int summaryCarry;
     private ObjectiveType objectiveType=ObjectiveType.CLEAR_VEINS;
@@ -238,7 +239,7 @@ public final class CaveScreen extends ScreenAdapter {
         random.setSeed(seed^0x1234FEDCBA98765L);
         buildVeins();
         syncWorkers(true);
-        guardianX=cx(map.startCol)-Math.min(cellW,cellH)*.28f;guardianY=cy(map.startRow);guardianMaxHp=state.guardianMaxHp();guardianHp=guardianMaxHp;guardianDead=state.guardianLevel<=0;guardianTarget=null;
+        guardianX=cx(map.startCol)-Math.min(cellW,cellH)*.28f;guardianY=cy(map.startRow);guardianMaxHp=state.guardianMaxHp();guardianHp=guardianMaxHp;guardianDead=state.guardianLevel<=0;guardianTarget=null;guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
         enemyTimer=Math.max(7f,18f-state.depth*.18f)+random.nextFloat()*7f;
         hazardTimer=Math.max(8f,17f-state.depth*.20f)+random.nextFloat()*10f;
         levelClearTimer=-1f;setupObjective();
@@ -349,23 +350,74 @@ public final class CaveScreen extends ScreenAdapter {
 
     private void updateGuardian(float dt){
         if(state.guardianLevel<=0||guardianDead)return;
-        guardianMaxHp=Math.max(guardianMaxHp,state.guardianMaxHp());guardianHp=Math.min(guardianMaxHp,guardianHp);
+        guardianMaxHp=Math.max(guardianMaxHp,state.guardianMaxHp());
+        guardianHp=Math.min(guardianMaxHp,guardianHp);
         guardianCooldown-=dt;
-        float hx=cx(map.startCol)-Math.min(cellW,cellH)*.28f,hy=cy(map.startRow),leash=Math.min(cellW,cellH)*1.75f;
-        Mob best=null;float bd=Float.MAX_VALUE;
-        for(int pass=0;pass<2&&best==null;pass++)for(Mob m:mobs){
-            if(m.dead||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST)continue;
-            boolean thief=m.type.isImp()||m.type.stealsChest();if((pass==0)!=thief)continue;
-            float q=dist2(hx,hy,m.x,m.y);if(q<leash*leash&&q<bd){bd=q;best=m;}
+        float hx=cx(map.startCol)-Math.min(cellW,cellH)*.28f;
+        float hy=cy(map.startRow);
+        float leash=Math.min(cellW,cellH)*1.75f;
+        Mob best=null;
+        float bd=Float.MAX_VALUE;
+        for(int pass=0;pass<2&&best==null;pass++){
+            for(Mob m:mobs){
+                if(m.dead||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST)continue;
+                boolean thief=m.type==EnemyType.IMP;
+                if((pass==0)!=thief)continue;
+                float q=dist2(hx,hy,m.x,m.y);
+                if(q<leash*leash&&q<bd){bd=q;best=m;}
+            }
         }
         guardianTarget=best;
         float speed=58f*ui*(1f+Math.min(.45f,state.guardianLevel*.04f));
-        if(best==null){moveGuardian(hx,hy,speed,dt);return;}
-        float di=distance(guardianX,guardianY,best.x,best.y),reach=Math.min(cellW,cellH)*.34f;
-        if(di>reach){moveGuardian(best.x,best.y,speed,dt);return;}
-        if(guardianCooldown<=0){guardianCooldown=state.guardianAttackInterval();guardianAttackAnim=.34f;best.hp-=state.guardianDamage();best.hitFlash=.16f;if(best.type.isImp())best.flee=.9f;spawnSparks(best.x,best.y,0xFFFFD873,4);}
+        if(best==null){
+            moveGuardianRouted(map.index(map.startCol,map.startRow),hx,hy,speed,dt);
+            return;
+        }
+        float di=distance(guardianX,guardianY,best.x,best.y);
+        float reach=Math.min(cellW,cellH)*.34f;
+        if(di>reach){
+            moveGuardianRouted(cellFor(best.x,best.y),best.x,best.y,speed,dt);
+            return;
+        }
+        guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
+        if(guardianCooldown<=0){
+            guardianCooldown=state.guardianAttackInterval();
+            guardianAttackAnim=.34f;
+            best.hp-=state.guardianDamage();
+            best.hitFlash=.16f;
+            if(best.type.isImp())best.flee=.9f;
+            spawnSparks(best.x,best.y,0xFFFFD873,4);
+        }
     }
-    private void moveGuardian(float tx,float ty,float speed,float dt){float dx=tx-guardianX,dy=ty-guardianY,di=len(dx,dy);if(di<1f)return;float step=Math.min(di,speed*dt);guardianX+=dx/di*step;guardianY+=dy/di*step;}
+
+    private void moveGuardianRouted(int goal,float exactX,float exactY,float speed,float dt){
+        int cur=cellFor(guardianX,guardianY);
+        if(cur==goal){
+            guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
+            moveGuardianDirect(exactX,exactY,speed,dt);
+            return;
+        }
+        if(guardianGoal!=goal||guardianPath.length==0||guardianPathIndex>=guardianPath.length){
+            guardianGoal=goal;
+            guardianPath=map.path(cur,goal);
+            guardianPathIndex=Math.min(1,guardianPath.length);
+        }
+        if(guardianPath.length==0||guardianPathIndex>=guardianPath.length)return;
+        int node=guardianPath[guardianPathIndex];
+        if(map.isBlocked(node)){guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;return;}
+        float tx=cx(map.col(node)),ty=cy(map.row(node));
+        float dx=tx-guardianX,dy=ty-guardianY,di=len(dx,dy);
+        if(di<2.5f*ui){guardianX=tx;guardianY=ty;guardianPathIndex++;return;}
+        float step=Math.min(di,speed*dt);
+        guardianX+=dx/di*step;guardianY+=dy/di*step;
+    }
+
+    private void moveGuardianDirect(float tx,float ty,float speed,float dt){
+        float dx=tx-guardianX,dy=ty-guardianY,di=len(dx,dy);
+        if(di<1f)return;
+        float step=Math.min(di,speed*dt);
+        guardianX+=dx/di*step;guardianY+=dy/di*step;
+    }
 
     private void updateWorkers(float dt){
         int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
@@ -504,11 +556,26 @@ public final class CaveScreen extends ScreenAdapter {
         }return mask;
     }
 
+    private boolean isDangerCellFor(Worker w,int cell){
+        int smart=w.tier.ordinal();
+        for(CaveHazard h:hazards){
+            if(h.type==HazardType.COLLAPSE||h.cleared)continue;
+            boolean seen=h.fired||(smart>=2&&h.age>.22f)||(smart>=4&&h.age>.05f);
+            if(!seen)continue;
+            if(h.cell==cell)return true;
+            if(smart>=4&&h.type==HazardType.LAVA){
+                int hc=map.col(h.cell),hr=map.row(h.cell),c=map.col(cell),r=map.row(cell);
+                if(Math.abs(hc-c)+Math.abs(hr-r)==1)return true;
+            }
+        }
+        return false;
+    }
+
     private void followWorker(Worker w,float speed,float dt){
         if(w.path.length==0||w.pathIndex>=w.path.length){w.vx=w.vy=0;return;}
         float remaining=Math.max(0,speed*dt),moved=0;int guard=0;float lastNx=0,lastNy=0;
         while(remaining>.001f&&w.pathIndex<w.path.length&&guard++<20){
-            int node=w.path[w.pathIndex];if(map.isBlocked(node)){w.path=new int[0];w.pathIndex=0;w.goalCell=-1;w.vx=w.vy=0;return;}float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
+            int node=w.path[w.pathIndex];if(map.isBlocked(node)||isDangerCellFor(w,node)){w.path=new int[0];w.pathIndex=0;w.goalCell=-1;w.vx=w.vy=0;return;}float tx=cx(map.col(node)),ty=cy(map.row(node));float dx=tx-w.x,dy=ty-w.y,di=len(dx,dy);
             if(di<.001f){w.x=tx;w.y=ty;w.pathIndex++;continue;}
             float nx=dx/di,ny=dy/di;lastNx=nx;lastNy=ny;
             if(di<=remaining){w.x=tx;w.y=ty;w.pathIndex++;remaining-=di;moved+=di;}
@@ -533,15 +600,15 @@ public final class CaveScreen extends ScreenAdapter {
             if(m.type==EnemyType.SUCCUBUS){updateSuccubus(m,dt);continue;}
             if(m.type.isImp()&&m.flee>0){fleeImp(m,dt);continue;}
 
-            boolean thief=m.type.isImp();
-            boolean canHitGuard=!guardianDead&&state.guardianLevel>0&&(m.type.isDemon()||m.type.isElemental()||(m.type.isImp()&&m.enraged));
+            boolean thief=m.type==EnemyType.IMP;
+            boolean canHitGuard=!guardianDead&&state.guardianLevel>0&&(m.type.isDemon()||m.type.isElemental()||m.type==EnemyType.IMP_KING||(m.type==EnemyType.IMP&&m.enraged));
             float qGuard=canHitGuard?dist2(m.x,m.y,guardianX,guardianY):Float.MAX_VALUE;
             Worker near=nearestWorker(m.x,m.y);float qWorker=near==null?Float.MAX_VALUE:dist2(m.x,m.y,near.x,near.y);
             int goal;
             if(thief&&!m.enraged){goal=map.index(map.startCol,map.startRow);m.target=null;}
             else if(qGuard<qWorker*1.15f){goal=cellFor(guardianX,guardianY);m.target=null;}
             else {m.target=near;goal=near==null?map.index(map.startCol,map.startRow):cellFor(near.x,near.y);}
-            if(m.routeTimer<=0||m.goalCell!=goal){m.goalCell=goal;m.path=(thief&&!m.enraged)?map.pathIgnoringBlocks(cellFor(m.x,m.y),goal):map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=.48f;}
+            if(m.routeTimer<=0||m.goalCell!=goal){m.goalCell=goal;m.path=m.type.isImp()?map.pathIgnoringBlocks(cellFor(m.x,m.y),goal):map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=.48f;}
             boolean reached=followMob(m,m.type.moveSpeed*state.enemySpeedScale(m.type)*ui,dt);
             if(reached){if(thief&&!m.enraged)robChest(m);else if(qGuard<qWorker*1.15f)attackGuardian(m);else attackWorker(m,m.target);}
             if((m.type==EnemyType.IMP_KING||m.type==EnemyType.DEMON_KING)&&m.summonCooldown<=0&&mobs.size()+pendingMobs.size()<30){m.summonCooldown=m.type==EnemyType.IMP_KING?6.5f:8f;EnemyType t=m.type==EnemyType.IMP_KING?EnemyType.IMP:EnemyType.DEMON;pendingMobs.add(createMob(t,m.x,m.y));pendingMobs.add(createMob(t,m.x,m.y));}
@@ -573,10 +640,10 @@ public final class CaveScreen extends ScreenAdapter {
     private String ghostLootToast(long[] st){long v=st[0]+st[1]*8L+st[2]*20L;return v>0?"ПРИЗРАК УНЕС СОКРОВИЩА • "+v:"ПРИЗРАК НЕ НАШЁЛ ДОБЫЧИ";}
 
     private void attackWorker(Mob m,Worker w){
-        if(w==null||m.attackCooldown>0||m.type.isImp()||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST)return;m.attackCooldown=1.0f;m.attack=.40f;float power=m.type.contactPower*state.enemyDamageScale(m.type);w.stun=Math.max(w.stun,.35f+power*.018f);spawnSparks(w.x,w.y,0xFFFF765D,4);float survive=state.hazardSurvivalBonus(w.tier.ordinal());float lethality=Math.min(.62f,.012f+power*.007f);if(m.type.isBoss())lethality=Math.min(.78f,lethality*1.35f);if(random.nextFloat()<lethality*(1-survive))loseWorker(w,m.type.title+" убил гнома");
+        if(w==null||m.attackCooldown>0||m.type==EnemyType.IMP||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST)return;m.attackCooldown=1.0f;m.attack=.40f;float power=m.type.contactPower*state.enemyDamageScale(m.type);w.stun=Math.max(w.stun,.35f+power*.018f);spawnSparks(w.x,w.y,0xFFFF765D,4);float survive=state.hazardSurvivalBonus(w.tier.ordinal());float lethality=Math.min(.62f,.012f+power*.007f);if(m.type.isBoss())lethality=Math.min(.78f,lethality*1.35f);if(random.nextFloat()<lethality*(1-survive))loseWorker(w,m.type.title+" убил гнома");
     }
     private void attackGuardian(Mob m){
-        if(guardianDead||m.attackCooldown>0||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST||m.type.isImp()&&!m.enraged)return;m.attackCooldown=.95f;m.attack=.42f;float damage=(7f+m.type.contactPower*5f)*state.enemyDamageScale(m.type);guardianHp-=damage;guardianHitFlash=.22f;spawnSparks(guardianX,guardianY,0xFF75C5DE,5);if(guardianHp<=0){guardianHp=0;guardianDead=true;guardianTarget=null;toast="СТРАЖ ПАЛ В БОЮ";toastTime=2f;game.audio.vibrate(80);}
+        if(guardianDead||m.attackCooldown>0||m.type==EnemyType.SUCCUBUS||m.type==EnemyType.GHOST||m.type==EnemyType.IMP&&!m.enraged)return;m.attackCooldown=.95f;m.attack=.42f;float damage=(7f+m.type.contactPower*5f)*state.enemyDamageScale(m.type);guardianHp-=damage;guardianHitFlash=.22f;spawnSparks(guardianX,guardianY,0xFF75C5DE,5);if(guardianHp<=0){guardianHp=0;guardianDead=true;guardianTarget=null;toast="СТРАЖ ПАЛ В БОЮ";toastTime=2f;game.audio.vibrate(80);}
     }
     private void killMob(Mob m){
         if(m.dead)return;m.dead=true;m.attack=-2f;state.enemiesDefeated++;spawnDeath(m);screenShake=Math.max(screenShake,2.2f*ui);if(priorityKind==PriorityKind.MOB&&priorityMob==m){clearPriority(false);toast="ЦЕЛЬ УНИЧТОЖЕНА";toastTime=1.2f;}if(m.type.isBoss()){int reward=3+state.depth/8;state.diamond+=reward;toast="БОСС ПОВЕРЖЕН • ◆"+reward;toastTime=2.4f;}
@@ -589,7 +656,7 @@ public final class CaveScreen extends ScreenAdapter {
         EnemyType type=chooseEnemyType();if(type==EnemyType.IMP){openPortal(type,3+random.nextInt(4));}else if(type==EnemyType.DEMON){openPortal(type,2+random.nextInt(3));}else if(type==EnemyType.SUCCUBUS){EnemyType[] q={EnemyType.DEMON,EnemyType.SUCCUBUS,EnemyType.DEMON};openPortal(q);}else spawnMob(type);
         toast="ТРЕВОГА • "+type.title.toUpperCase();toastTime=1.3f;game.audio.play(GameAudio.Sfx.ENEMY,.48f);
     }
-    private EnemyType chooseEnemyType(){int d=state.depth;float r=random.nextFloat();if(d>=18&&r<.12f)return EnemyType.FIRE_GOLEM;if(d>=15&&r<.24f)return EnemyType.WATER_GOLEM;if(d>=12&&r<.37f)return EnemyType.STONE_GOLEM;if(d>=9&&r<.45f&&!hasLiving(EnemyType.SUCCUBUS))return EnemyType.SUCCUBUS;if(d>=7&&r<.67f)return EnemyType.DEMON;return EnemyType.IMP;}
+    private EnemyType chooseEnemyType(){int d=state.depth;float r=random.nextFloat();if(d>=4&&r<.018f)return EnemyType.GHOST;if(d>=18&&r<.13f)return EnemyType.FIRE_GOLEM;if(d>=15&&r<.25f)return EnemyType.WATER_GOLEM;if(d>=12&&r<.38f)return EnemyType.STONE_GOLEM;if(d>=9&&r<.42f&&!hasLiving(EnemyType.SUCCUBUS))return EnemyType.SUCCUBUS;if(d>=7&&r<.66f)return EnemyType.DEMON;return EnemyType.IMP;}
     private void spawnBoss(){EnemyType t=state.depth>=30?EnemyType.ELEMENTAL_KING:state.depth>=20?EnemyType.DEMON_KING:EnemyType.IMP_KING;if(t==EnemyType.ELEMENTAL_KING)spawnMob(t);else openPortal(t,1);toast="БОСС • "+t.title.toUpperCase();toastTime=2.6f;game.audio.play(GameAudio.Sfx.BOSS,.90f);game.audio.vibrate(90);}
     private void openPortal(EnemyType type,int n){EnemyType[] q=new EnemyType[n];java.util.Arrays.fill(q,type);openPortal(q);}
     private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}
@@ -638,17 +705,17 @@ public final class CaveScreen extends ScreenAdapter {
         float rr=h.r*.72f;
         for(int i=workers.size()-1;i>=0;i--){Worker w=workers.get(i);if(distance(w.x,w.y,h.x,h.y)<rr)loseWorker(w,"наступил в лаву");}
         for(Mob m:mobs){
-            if(m.dead||distance(m.x,m.y,h.x,h.y)>=rr)continue;
+            if(m.dead||m.type==EnemyType.GHOST||distance(m.x,m.y,h.x,h.y)>=rr)continue;
             if(m.type==EnemyType.FIRE_GOLEM)continue;
-            if(m.type==EnemyType.IMP||m.type==EnemyType.DEMON)m.hp=0;
+            if(m.type==EnemyType.IMP||m.type==EnemyType.DEMON||m.type==EnemyType.SUCCUBUS)m.hp=0;
             else m.hp-=m.maxHp*.18f*dt;
         }
     }
 
     private void hitMobsWithHazard(CaveHazard h){
         for(Mob m:mobs){
-            if(m.dead||distance(m.x,m.y,h.x,h.y)>h.r)continue;
-            boolean small=m.type==EnemyType.IMP||m.type==EnemyType.DEMON;
+            if(m.dead||m.type==EnemyType.GHOST||distance(m.x,m.y,h.x,h.y)>h.r)continue;
+            boolean small=m.type==EnemyType.IMP||m.type==EnemyType.DEMON||m.type==EnemyType.SUCCUBUS;
             switch(h.type){
                 case LAVA -> {if(m.type!=EnemyType.FIRE_GOLEM){if(small)m.hp=0;else m.hp-=m.maxHp*.18f;}}
                 case PIT -> {if(small&&random.nextFloat()<.48f)m.hp=0;else m.hp-=m.maxHp*.08f;}
@@ -660,7 +727,7 @@ public final class CaveScreen extends ScreenAdapter {
 
     private void invalidateRoutes(){
         for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;}
-        for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}
+        for(Mob m:mobs){m.goalCell=-1;m.path=new int[0];m.pathIndex=0;m.routeTimer=0;}guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
     }
 
     private void updateFx(float dt){for(Iterator<Fx>it=fx.iterator();it.hasNext();){Fx p=it.next();p.life-=dt;if(p.life<=0){it.remove();continue;}p.x+=p.vx*dt;p.y+=p.vy*dt;if(!p.spark)p.vy+=45f*ui*dt;else{p.vx*=Math.max(0,1-dt*3);p.vy*=Math.max(0,1-dt*3);}}int limit=workers.size()>120?120:workers.size()>90?165:workers.size()>70?215:400;if(fx.size()>limit)fx.subList(0,fx.size()-limit).clear();}

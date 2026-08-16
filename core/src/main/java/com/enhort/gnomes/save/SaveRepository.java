@@ -15,6 +15,35 @@ public final class SaveRepository {
     private final Preferences meta = Gdx.app.getPreferences(META_NAME);
     private final Json json = new Json();
 
+    public SaveRepository() { migrateAllLegacyRuneProgress(); }
+
+    private void migrateAllLegacyRuneProgress() {
+        if (meta.getBoolean("initialized", false)) return;
+        int[] best = new int[com.enhort.gnomes.game.model.RuneType.values().length];
+        boolean[] active = new boolean[best.length];
+        for (int slot = 1; slot <= SLOT_COUNT; slot++) {
+            if (!prefs.contains(key(slot))) continue;
+            try {
+                Snapshot snap = json.fromJson(Snapshot.class, prefs.getString(key(slot)));
+                if (snap == null || snap.runeLevels == null) continue;
+                for (int i = 0; i < Math.min(best.length, snap.runeLevels.length); i++) {
+                    if (snap.runeLevels[i] > best[i]) best[i] = snap.runeLevels[i];
+                    boolean wasActive = snap.runeActive == null || i >= snap.runeActive.length || snap.runeActive[i];
+                    active[i] |= snap.runeLevels[i] > 0 && wasActive;
+                }
+            } catch (Exception ignored) { }
+        }
+        Preferences old = Gdx.app.getPreferences("gnomes_save_v2");
+        for (int i = 0; i < best.length; i++) {
+            best[i] = Math.max(best[i], old.getInteger("runeLevel_" + i, 0));
+            if (best[i] > 0) active[i] = true;
+            meta.putInteger("runeLevel_" + i, best[i]);
+            meta.putBoolean("runeActive_" + i, active[i]);
+        }
+        meta.putBoolean("initialized", true);
+        meta.flush();
+    }
+
     public boolean exists(int slot) { return valid(slot) && prefs.contains(key(slot)); }
 
     public GameState fresh(int slot) { return fresh(slot, 2); }

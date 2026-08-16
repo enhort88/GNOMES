@@ -215,7 +215,7 @@ public final class MenuScreen extends ScreenAdapter {
     }
 
     private void main(Draw d){
-        heading(d,"DEEP MINE • ALPHA 0.4");
+        heading(d,"DEEP MINE • ALPHA 0.5");
         button(d,main[0],"ИГРАТЬ",true,UiTheme.GOLD,false,1f);
         button(d,main[1],"ПРОДОЛЖИТЬ",game.saves.anySave(),UiTheme.GREEN,false,.94f);
         button(d,main[2],"СОХРАНЕНИЯ",true,UiTheme.STEEL,false,.92f);
