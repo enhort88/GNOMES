@@ -38,7 +38,7 @@ public final class GameAudio implements Disposable {
             lastPlayed.put(sfx, 0L);
         }
         try {
-            music = Gdx.audio.newMusic(Gdx.files.internal("music/mine_loop.wav"));
+            music = Gdx.audio.newMusic(Gdx.files.internal("music/mine_loop_v2.wav"));
             music.setLooping(true);
             music.play();
             refreshMusic();
@@ -47,7 +47,7 @@ public final class GameAudio implements Disposable {
 
     public void refreshMusic() {
         if (music == null) return;
-        float volume = settings.soundEnabled ? Math.max(0f, Math.min(1f, settings.soundVolume * .38f)) : 0f;
+        float volume = settings.musicEnabled ? Math.max(0f, Math.min(1f, settings.musicVolume * .50f)) : 0f;
         music.setVolume(volume);
         if (!music.isPlaying()) music.play();
     }

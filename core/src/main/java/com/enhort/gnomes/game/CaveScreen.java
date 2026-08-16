@@ -31,7 +31,7 @@ public final class CaveScreen extends ScreenAdapter {
     private enum WorkerAction { IDLE, WALK, CARRY, MINE, FIGHT, STUNNED }
     private enum PriorityKind { NONE, VEIN, MOB, HAZARD, POINT }
     private enum Tab { GNOMES, UPGRADES, ARTIFACTS, RUNES }
-    private enum ObjectiveType { CLEAR_VEINS, GUARDIAN, DEMON_PURGE, BOSS_HUNT, TREASURE }
+    private enum ObjectiveType { ASCEND_GNOME, CLEAR_VEINS, GUARDIAN, DEMON_PURGE, BOSS_HUNT, TREASURE }
 
     private static final class Box {
         float l,t,r,b;
@@ -422,13 +422,14 @@ public final class CaveScreen extends ScreenAdapter {
     private void updateWorkers(float dt){
         int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
         CaveHazard cleanup=firstActiveCollapse();
-        int cleanupLeft=cleanup==null?0:Math.max(1,Math.min(8,(workers.size()+17)/18));
+        int cleanupLeft=cleanup==null?0:Math.max(2,Math.min(14,(workers.size()+5)/6));
         for(int i=workers.size()-1;i>=0;i--){
             Worker w=workers.get(i);
             w.spawn=Math.max(0,w.spawn-dt);w.attackCooldown-=dt;w.allyCooldown-=dt;w.charm=Math.max(0,w.charm-dt);if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;if(w.routeRetry>0)w.routeRetry-=dt;
             if(w.spawn>0){w.action=WorkerAction.IDLE;w.vx=w.vy=0;continue;}
             if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
             if(w.charm>0){fightAlly(w,dt);continue;}
+            if(cleanupLeft>0&&cleanup!=null&&!cleanup.cleared){cleanupLeft--;w.vein=null;w.mob=null;clearCollapse(w,cleanup,dt);continue;}
 
             if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;}
             if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){w.vein=null;w.mob=priorityMob;fight(w,priorityMob,dt);continue;}
@@ -441,7 +442,6 @@ public final class CaveScreen extends ScreenAdapter {
             w.mob=null;
             float cap=w.tier.cargoCapacity*state.carryMultiplier(w.tier.ordinal());
             if(w.hasCargo()&&w.cargo()>=cap*.92){carryHome(w,dt);continue;}
-            if(cleanupLeft>0&&cleanup!=null&&!cleanup.cleared){cleanupLeft--;w.vein=null;clearCollapse(w,cleanup,dt);continue;}
             if(w.vein==null||w.vein.dead||map.isBlocked(w.vein.cell))w.vein=chooseVein(w);
             if(w.vein!=null)mine(w,w.vein,dt); else if(w.hasCargo())carryHome(w,dt); else {w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
         }
@@ -585,7 +585,17 @@ public final class CaveScreen extends ScreenAdapter {
         if(w.pathIndex>=w.path.length){w.vx=w.vy=0;}
     }
 
-    private Vein chooseVein(Worker w){Vein best=null;float bd=Float.MAX_VALUE;for(Vein v:veins){if(v.dead||map.isBlocked(v.cell))continue;float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));if(d<bd){bd=d;best=v;}}return best;}
+    private Vein chooseVein(Worker w){
+        Vein best=null;float bestScore=Float.MAX_VALUE,unit=Math.min(cellW,cellH);float crowdPenalty=unit*unit*3.8f;
+        for(Vein v:veins){
+            if(v.dead||map.isBlocked(v.cell))continue;
+            int assigned=0;for(Worker other:workers)if(other!=w&&other.vein==v&&!v.dead)assigned++;
+            int[] route=map.pathAvoiding(cellFor(w.x,w.y),v.cell,dangerMask(w));if(route.length==0)continue;
+            float d=dist2(w.x,w.y,cx(map.col(v.cell)),cy(map.row(v.cell)));
+            float score=d+assigned*crowdPenalty+(Math.floorMod(w.visualId+v.seed,11)*.015f*crowdPenalty);
+            if(score<bestScore){bestScore=score;best=v;}
+        }return best;
+    }
     private void updatePortal(float dt){
         if(portal==null)return;portal.age+=dt;portal.spawnTimer-=dt;if(portal.next>=portal.queue.length){portal.closeAge+=dt;if(portal.done())portal=null;return;}if(portal.spawnTimer>0||portal.age<.42f)return;
         EnemyType type=portal.queue[portal.next++];Mob m=createMob(type,portal.x,portal.y);m.spawn=.42f;mobs.add(m);portal.spawnTimer=.30f+(type.isBoss()?.22f:0);if(portal.next>=portal.queue.length)portal.closeAge=0;
@@ -738,7 +748,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void spawnSparks(float x,float y,int color,int n){n=Math.min(n,fxBudget(n,Math.max(1,n/2)));for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(25+random.nextFloat()*85)*ui;fx.add(new Fx(x,y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp,.18f+random.nextFloat()*.3f,(1+random.nextFloat()*1.7f)*ui,color,true));}}
 
     private void drawWorld(Draw d){
-        d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawCaveDecor(d);drawHazards(d);drawVeins(d);drawChest(d);drawPortal(d);
+        d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawWetCorridors(d);drawCaveDecor(d);drawHazards(d);drawVeins(d);drawChest(d);drawPortal(d);
         for(int row=0;row<map.rows;row++){for(Worker w:workers)if(rowForY(w.y)==row)drawWorker(d,w);for(Mob m:mobs)if(rowForY(m.y)==row)drawMob(d,m);}
         if(state.guardianLevel>0&&!guardianDead){float gs=Math.min(cellW,cellH)*.54f;drawGuardian(d,guardianX,guardianY,gs);drawGuardianHealth(d,guardianX,guardianY,gs);}
         drawPriorityOverlay(d);for(Fx p:fx)drawFx(d,p);drawDarkZones(d);drawAtmosphere(d);
@@ -759,11 +769,30 @@ public final class CaveScreen extends ScreenAdapter {
         for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){int idx=map.index(c,r);if(map.degree(c,r)>=3){d.setColor(0xFF3B352E);d.fillCircle(cx(c),cy(r),inner*.58f);}if((idx+state.depth*3)%14==0&&!isDarkCell(idx))drawTorch(d,cx(c)-inner*.26f,cy(r)-inner*.38f,idx);if((idx*7+state.depth)%19==0){d.setColor(0xFF6A4A31);d.strokeWidth=2f*ui;d.line(cx(c)-inner*.45f,cy(r)-inner*.48f,cx(c)-inner*.45f,cy(r)+inner*.48f);d.line(cx(c)+inner*.45f,cy(r)-inner*.48f,cx(c)+inner*.45f,cy(r)+inner*.48f);d.line(cx(c)-inner*.52f,cy(r)-inner*.34f,cx(c)+inner*.52f,cy(r)-inner*.34f);}}
     }
     private void drawTunnelEdges(Draw d){for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){if(map.connected(c,r,CaveMap.E))d.line(cx(c),cy(r),cx(c+1),cy(r));if(map.connected(c,r,CaveMap.S))d.line(cx(c),cy(r),cx(c),cy(r+1));}}
+    private void drawWetCorridors(Draw d){
+        float base=Math.min(cellW,cellH);int wet=0;
+        for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){
+            int cell=map.index(c,r);long h=map.seed^cell*0x94D049BB133111EBL;if(hash01(h)>.13f)continue;
+            int dir=map.connected(c,r,CaveMap.E)?CaveMap.E:(map.connected(c,r,CaveMap.S)?CaveMap.S:0);if(dir==0)continue;
+            float x1=cx(c),y1=cy(r),x2=cx(c+CaveMap.dx(dir)),y2=cy(r+CaveMap.dy(dir));
+            d.setColor(0xAA244B35);d.strokeWidth=base*.20f;d.line(x1,y1,x2,y2);
+            d.setColor(0x884E9A65);d.strokeWidth=base*.11f;d.line(x1,y1,x2,y2);
+            d.setColor(0xAA3CA9B5);d.strokeWidth=base*.045f;d.line(x1,y1+2f*ui*(float)Math.sin(elapsed*2.4f+cell),x2,y2+2f*ui*(float)Math.sin(elapsed*2.4f+cell+1.7f));
+            for(int i=0;i<4;i++){float q=(i*.27f+elapsed*(.08f+.02f*(cell%3)))%1f;float x=x1+(x2-x1)*q,y=y1+(y2-y1)*q+(float)Math.sin(elapsed*4f+i+cell)*2f*ui;d.setColor(0x665BD5C2);d.fillCircle(x,y,(1.1f+i%2*.7f)*ui);}wet++;if(wet>10)return;
+        }
+    }
     private void drawCaveDecor(Draw d){
         if(workers.size()>100)return;for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){int cell=map.index(c,r);long q=map.seed^cell*0x9E3779B97F4A7C15L;float x=cx(c),y=cy(r),k=hash01(q);if(k<.055f){d.setColor(0xFF31583A);d.strokeWidth=1.5f*ui;for(int i=0;i<4;i++)d.line(x-7f*ui+i*4f*ui,y-13f*ui,x-4f*ui+i*3f*ui,y+8f*ui);d.setColor(0xFF4F784B);for(int i=0;i<5;i++)d.fillCircle(x-7f*ui+i*4f*ui,y-5f*ui+i%2*5f*ui,2.2f*ui);}else if(k>.94f){float drip=((elapsed*(8+cell%5)+cell*17)%32)*ui;d.setColor(0x665CBCE3);d.strokeWidth=1f*ui;d.line(x,y-18f*ui,x,y-8f*ui+drip*.25f);d.fillOval(x-1.2f*ui,y-8f*ui+drip*.45f,x+1.2f*ui,y-4f*ui+drip*.45f);}if(cell%37==state.depth%37&&r<map.rows/2){d.setColor(0x18DDF6D7);d.pathReset();d.moveTo(x-24f*ui,worldT);d.lineTo(x+7f*ui,worldT);d.lineTo(x+26f*ui,y+34f*ui);d.lineTo(x-12f*ui,y+34f*ui);d.closePath();d.fillPath();}}
     }
     private boolean isDarkCell(int cell){if(state.depth<3||cell==map.index(map.startCol,map.startRow))return false;return hash01(map.seed^cell*0xD1B54A32D192ED03L)<.105f;}
-    private void drawDarkZones(Draw d){for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){int cell=map.index(c,r);if(!isDarkCell(cell))continue;float rr=Math.min(cellW,cellH)*.53f;d.setColor(0xB9080909);d.fillCircle(cx(c),cy(r),rr);}for(Worker w:workers){if(isDarkCell(cellFor(w.x,w.y))){float rr=18f*ui+w.tier.ordinal()*2f*ui;d.setColor(0x226FC6E9);d.fillCircle(w.x,w.y,rr);d.setColor(0x22FFD170);d.fillCircle(w.x,w.y,rr*.55f);}}}
+    private void drawDarkZones(Draw d){
+        for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){
+            int cell=map.index(c,r);if(!isDarkCell(cell))continue;float rr=Math.min(cellW,cellH)*.56f,x=cx(c),y=cy(r);
+            for(int i=0;i<6;i++){float a=i*1.0472f+hash01(map.seed+cell*31L)*2f,ox=(float)Math.cos(a)*rr*.24f,oy=(float)Math.sin(a)*rr*.20f,rad=rr*(.52f+.12f*hash01(cell*97L+i));d.setColor(i<2?0x76060708:0x54060708);d.fillCircle(x+ox,y+oy,rad);}
+            d.setColor(0x220D1113);d.strokeWidth=2f*ui;d.strokeCircle(x,y,rr*.88f);
+        }
+        for(Worker w:workers)if(isDarkCell(cellFor(w.x,w.y))){float rr=(20f+w.tier.ordinal()*2f)*ui;d.setColor(0x145CB7D4);d.fillCircle(w.x,w.y,rr);d.setColor(0x20FFD170);d.fillCircle(w.x,w.y,rr*.42f);}
+    }
     private void drawPortal(Draw d){if(portal==null)return;float p=Math.min(1f,portal.age/.42f),close=portal.next>=portal.queue.length?Math.max(0,1-portal.closeAge):1f,rr=Math.min(cellW,cellH)*.34f*p*close;d.setColor(0x444E1D6D);d.fillCircle(portal.x,portal.y,rr*1.3f);for(int i=0;i<5;i++){float a=elapsed*(2.5f+i*.3f)+i*1.25f;d.setColor(i%2==0?0xFFB34CE2:0xFFE45658);d.strokeWidth=(1.2f+i*.25f)*ui;d.strokeCircle(portal.x+(float)Math.cos(a)*rr*.12f,portal.y+(float)Math.sin(a)*rr*.12f,rr*(.58f+i*.09f));}}
 
     private void drawTorch(Draw d,float x,float y,int seed){
@@ -834,28 +863,12 @@ public final class CaveScreen extends ScreenAdapter {
         d.setColor(0x66000000);d.fillOval(x-s*.38f,y+s*.18f,x+s*.38f,y+s*.34f);d.setColor(0xFF5A351E);d.fillRoundRect(x-s*.29f,y-s*.14f,x+s*.29f,y+s*.22f,4f*ui);d.setColor(0xFF8A572C);d.fillRoundRect(x-s*.30f,y-s*.28f,x+s*.30f,y-s*.02f,8f*ui);d.setColor(0xFFD4A342);d.fillRect(x-s*.035f,y-s*.15f,x+s*.035f,y+s*.12f);d.fillCircle(x,y+s*.04f,s*.045f);
     }
     private void drawGuardian(Draw d,float x,float y,float s){
-        float bob=(float)Math.sin(elapsed*3.1f)*1.1f*ui,attack=guardianAttackAnim>0?(float)Math.sin((.34f-guardianAttackAnim)/.34f*Math.PI):0;
-        float appear=guardianSpawnAnim>0?appearScale(guardianSpawnAnim,.70f):1f;
-        if(guardianSpawnAnim>0)drawArrivalRing(d,x,y,s*.80f,guardianSpawnAnim,.70f,0xFF70D7FF);
-        d.save();d.translate(x,y+bob);d.scale(appear,appear);
-        d.setColor(0x66000000);d.fillOval(-s*.38f,s*.48f,s*.40f,s*.62f);
-        // boots and legs
-        d.setColor(0xFF302A27);d.strokeWidth=s*.13f;d.line(-s*.13f,s*.25f,-s*.20f,s*.52f);d.line(s*.13f,s*.25f,s*.20f,s*.52f);d.fillOval(-s*.32f,s*.46f,-s*.08f,s*.58f);d.fillOval(s*.08f,s*.46f,s*.32f,s*.58f);
-        // steel-blue coat and plate
-        d.setColor(0xFF27495B);d.fillOval(-s*.31f,-s*.03f,s*.31f,s*.38f);d.setColor(0xFF718A98);d.fillRoundRect(-s*.24f,s*.02f,s*.24f,s*.30f,s*.05f);d.setColor(0xFFBCD0D8);d.strokeWidth=s*.045f;d.line(-s*.17f,s*.05f,s*.17f,s*.25f);d.line(s*.17f,s*.05f,-s*.17f,s*.25f);
-        // head, nose, beard
-        d.setColor(0xFFE4B483);d.fillCircle(0,-s*.22f,s*.22f);d.fillCircle(s*.20f,-s*.20f,s*.055f);d.setColor(0xFFE2E4E2);d.pathReset();d.moveTo(-s*.20f,-s*.11f);d.lineTo(0,s*.23f);d.lineTo(s*.21f,-s*.11f);d.lineTo(s*.09f,s*.10f);d.lineTo(-s*.08f,s*.10f);d.closePath();d.fillPath();
-        d.setColor(0xFF101314);d.fillCircle(s*.11f,-s*.27f,s*.025f);
-        // helmet with nose guard
-        d.setColor(0xFF7696A7);d.fillOval(-s*.27f,-s*.50f,s*.27f,-s*.27f);d.setColor(0xFFC9D7DE);d.fillRect(-s*.29f,-s*.35f,s*.29f,-s*.29f);d.fillRect(-s*.035f,-s*.36f,s*.035f,-s*.12f);d.setColor(0xFF476273);d.pathReset();d.moveTo(-s*.11f,-s*.50f);d.lineTo(0,-s*.67f);d.lineTo(s*.11f,-s*.50f);d.closePath();d.fillPath();
-        // shield on left
-        d.setColor(0xFF233641);d.pathReset();d.moveTo(-s*.34f,-s*.02f);d.lineTo(-s*.60f,s*.05f);d.lineTo(-s*.55f,s*.38f);d.lineTo(-s*.34f,s*.52f);d.lineTo(-s*.15f,s*.34f);d.closePath();d.fillPath();d.setColor(0xFF9DB2BC);d.strokeWidth=s*.045f;d.line(-s*.52f,s*.10f,-s*.25f,s*.38f);d.line(-s*.25f,s*.10f,-s*.52f,s*.38f);d.setColor(UiTheme.GOLD);d.fillCircle(-s*.37f,s*.24f,s*.055f);
-        // animated spear on right
-        float thrust=attack*s*.32f;d.setColor(0xFFE4B483);d.fillCircle(s*.23f+thrust*.25f,s*.03f,s*.065f);d.setColor(0xFF75523A);d.strokeWidth=s*.065f;d.line(s*.20f,s*.02f,s*.82f+thrust,-s*.24f);d.setColor(0xFFDCE7EC);d.pathReset();d.moveTo(s*.76f+thrust,-s*.21f);d.lineTo(s*1.03f+thrust,-s*.37f);d.lineTo(s*.87f+thrust,-s*.10f);d.closePath();d.fillPath();d.setColor(0xFFFFFFFF);d.strokeWidth=s*.022f;d.line(s*.85f+thrust,-s*.28f,s*.98f+thrust,-s*.35f);
-        if(state.guardianLevel>1){d.setColor(0xFF69D9F0);d.fillCircle(s*.02f,s*.11f,s*.045f);}
-        d.restore();
+        float bob=(float)Math.sin(elapsed*3.1f)*1.0f*ui,attack=guardianAttackAnim>0?(float)Math.sin((.34f-guardianAttackAnim)/.34f*Math.PI):0,dir=guardianTarget!=null&&guardianTarget.x<x?-1f:1f,appear=guardianSpawnAnim>0?appearScale(guardianSpawnAnim,.70f):1f;
+        if(guardianSpawnAnim>0)drawArrivalRing(d,x,y,s*.80f,guardianSpawnAnim,.70f,0xFF70D7FF);d.save();d.translate(x,y+bob);d.scale(dir*appear,appear);
+        d.setColor(0x66000000);d.fillOval(-s*.38f,s*.48f,s*.40f,s*.62f);d.setColor(0xFF44352B);d.strokeWidth=s*.13f;d.line(-s*.12f,s*.28f,-s*.20f,s*.55f);d.line(s*.12f,s*.28f,s*.20f,s*.55f);
+        d.setColor(guardianHitFlash>0?0xFFF0C080:0xFF496A78);d.fillRoundRect(-s*.30f,-s*.02f,s*.30f,s*.35f,s*.08f);d.setColor(0xFFE2B080);d.fillCircle(0,-s*.28f,s*.23f);d.setColor(0xFFEEE9DB);d.pathReset();d.moveTo(-s*.20f,-s*.16f);d.quadTo(0,s*.16f,s*.20f,-s*.16f);d.lineTo(s*.10f,s*.10f);d.lineTo(-s*.10f,s*.10f);d.closePath();d.fillPath();d.setColor(0xFF70828C);d.fillRoundRect(-s*.25f,-s*.50f,s*.25f,-s*.37f,s*.04f);
+        d.save();d.translate(s*.24f,-s*.02f);d.rotate(-74f+attack*118f);d.setColor(0xFF6B4329);d.strokeWidth=s*.085f;d.line(0,0,s*.70f,0);d.setColor(0xFFB9C3C9);d.pathReset();d.moveTo(s*.54f,-s*.27f);d.lineTo(s*.82f,-s*.20f);d.lineTo(s*.84f,s*.20f);d.lineTo(s*.55f,s*.30f);d.lineTo(s*.63f,0);d.closePath();d.fillPath();d.setColor(0xFFE4EDF1);d.strokeWidth=1.2f*ui;d.line(s*.58f,-s*.20f,s*.76f,-s*.15f);d.restore();d.restore();
     }
-
     private void drawGuardianHealth(Draw d,float x,float y,float s){if(guardianDead||guardianMaxHp<=0)return;float pct=Math.max(0,guardianHp/guardianMaxHp),bw=s*1.25f;d.setColor(0xCC101314);d.fillRoundRect(x-bw/2,y-s*.91f,x+bw/2,y-s*.82f,2f*ui);d.setColor(0xFF62BFD5);d.fillRoundRect(x-bw/2,y-s*.91f,x-bw/2+bw*pct,y-s*.82f,2f*ui);}
 
     private void drawWorker(Draw d,Worker w){
@@ -901,10 +914,21 @@ public final class CaveScreen extends ScreenAdapter {
     }
     private void spawnVisualDustHint(Draw d,float s){d.setColor(0x448E8174);for(int i=0;i<3;i++){float a=elapsed*4+i*2.1f;d.fillCircle(s*(.72f+(float)Math.cos(a)*.08f),s*(.07f+(float)Math.sin(a)*.10f),(2+i)*ui);}}
 
-    private void drawExcavator(Draw d,Worker w,float s){float walk=(float)Math.sin(w.walkCycle+w.phase);float p=w.action==WorkerAction.MINE?strikeProgress(w,.58f):.2f;float dir=facing(w);d.save();d.translate(w.x,w.y);d.scale(dir,1);d.setColor(0x55000000);d.fillOval(-s*.68f,s*.43f,s*.68f,s*.65f);d.setColor(0xFF2D3031);d.fillRoundRect(-s*.58f,s*.18f,s*.47f,s*.50f,s*.12f);d.setColor(0xFF5B6165);for(int i=0;i<4;i++)d.fillCircle(-s*.40f+i*s*.25f,s*.45f,s*.105f);d.setColor(w.tier.color);d.fillRoundRect(-s*.43f,-s*.20f,s*.18f,s*.28f,s*.08f);d.setColor(0xFF82C9E5);d.fillRect(-s*.29f,-s*.13f,s*.06f,s*.04f);d.setColor(0xFFE3B383);d.fillCircle(-s*.12f,-s*.04f,s*.11f);
-        float lift=w.action==WorkerAction.MINE?(float)Math.sin(Math.min(1,p)*Math.PI):.25f;float ax=s*(.50f+.07f*lift),ay=-s*(.34f+.23f*lift);d.setColor(0xFFD3A13A);d.strokeWidth=s*.13f;d.line(s*.08f,-s*.02f,ax,ay);d.line(ax,ay,s*.76f,s*(.10f-.18f*lift));d.setColor(0xFFB87F28);d.pathReset();d.moveTo(s*.62f,s*(.05f-.18f*lift));d.lineTo(s*.95f,s*(.02f-.18f*lift));d.lineTo(s*.78f,s*(.35f-.18f*lift));d.closePath();d.fillPath();d.restore();}
+    private void drawExcavator(Draw d,Worker w,float s){
+        float dir=facing(w),pulse=.5f+.5f*(float)Math.sin(elapsed*18f+w.phase);float tx=w.vein!=null?w.vein.x:(w.mob!=null?w.mob.x:w.x+dir*s),ty=w.vein!=null?w.vein.y:(w.mob!=null?w.mob.y:w.y);
+        if((w.action==WorkerAction.MINE||w.action==WorkerAction.FIGHT)&&w.swing>0){d.setColor(0x3346E7FF);d.strokeWidth=5f*ui;d.line(w.x+dir*s*.38f,w.y-s*.10f,tx,ty);d.setColor(0xFF8AF3FF);d.strokeWidth=(1.2f+pulse)*ui;d.line(w.x+dir*s*.38f,w.y-s*.10f,tx,ty);d.fillCircle(tx,ty,(2.2f+pulse*2f)*ui);}
+        d.save();d.translate(w.x,w.y);d.scale(dir,1);d.setColor(0x55000000);d.fillOval(-s*.62f,s*.44f,s*.62f,s*.62f);
+        d.setColor(0xFF2D3235);d.fillRoundRect(-s*.58f,s*.18f,s*.52f,s*.48f,s*.10f);d.setColor(0xFF666F74);for(int i=0;i<5;i++)d.fillCircle(-s*.42f+i*s*.20f,s*.43f,s*.085f);
+        d.setColor(0xFF4E6A78);d.fillRoundRect(-s*.31f,-s*.02f,s*.23f,s*.26f,s*.07f);
+        d.setColor(0xFFE2B080);d.fillCircle(-s*.05f,-s*.30f,s*.18f);d.setColor(0xFFF1EEE3);d.pathReset();d.moveTo(-s*.16f,-s*.20f);d.quadTo(-s*.02f,s*.02f,s*.16f,-s*.18f);d.lineTo(s*.08f,s*.05f);d.lineTo(-s*.12f,s*.03f);d.closePath();d.fillPath();d.setColor(w.tier.color);d.pathReset();d.moveTo(-s*.22f,-s*.46f);d.lineTo(s*.02f,-s*.66f);d.lineTo(s*.20f,-s*.42f);d.closePath();d.fillPath();
+        d.setColor(0xFF89979E);d.strokeWidth=s*.10f;d.line(s*.16f,s*.05f,s*.48f,-s*.12f);d.setColor(0xFFB8EAF5);d.fillRoundRect(s*.37f,-s*.22f,s*.58f,-s*.03f,s*.04f);d.setColor(0xFF62ECFF);d.fillCircle(s*.57f,-s*.13f,s*.06f);d.restore();if(w.hasCargo())drawSack(d,w,s);
+    }
 
-    private void drawIron(Draw d,Worker w,float s){float stride=(float)Math.sin(w.walkCycle+w.phase);float p=w.action==WorkerAction.MINE||w.action==WorkerAction.FIGHT?strikeProgress(w,w.action==WorkerAction.FIGHT?.46f:.58f):0;float dir=facing(w);d.save();d.translate(w.x,w.y-Math.abs(stride)*1.2f*ui);d.scale(dir,1);d.setColor(0x66000000);d.fillOval(-s*.53f,s*.49f,s*.53f,s*.70f);d.setColor(0xFF59636A);d.fillRoundRect(-s*.38f,-s*.04f,s*.38f,s*.46f,s*.10f);d.setColor(0xFF9FACB5);d.fillCircle(0,-s*.34f,s*.29f);d.setColor(0xFF242B30);d.fillRect(-s*.21f,-s*.43f,s*.21f,-s*.33f);d.setColor(0xFF6EE8FF);d.fillCircle(-s*.10f,-s*.38f,s*.035f);d.fillCircle(s*.10f,-s*.38f,s*.035f);d.setColor(0xFFCDD6DB);d.pathReset();d.moveTo(-s*.22f,-s*.20f);d.lineTo(0,s*.23f);d.lineTo(s*.22f,-s*.20f);d.lineTo(s*.08f,s*.16f);d.lineTo(-s*.08f,s*.16f);d.closePath();d.fillPath();d.setColor(0xFF69747B);d.strokeWidth=s*.17f;float punch=(float)Math.sin(p*Math.PI)*s*.20f;d.line(-s*.34f,s*.02f,-s*.56f,s*.34f);d.line(s*.34f,s*.02f,s*.58f+punch,s*.24f);d.line(-s*.17f,s*.42f,-s*.24f+stride*s*.05f,s*.68f);d.line(s*.17f,s*.42f,s*.24f-stride*s*.05f,s*.68f);drawAnimatedPick(d,s*.50f+punch,s*.20f,s,pickAngle(w),1);d.restore();}
+    private void drawIron(Draw d,Worker w,float s){
+        float stride=(float)Math.sin(w.walkCycle+w.phase),dir=facing(w),tx=w.vein!=null?w.vein.x:(w.mob!=null?w.mob.x:w.x+dir*s),ty=w.vein!=null?w.vein.y:(w.mob!=null?w.mob.y:w.y),beam=(w.action==WorkerAction.MINE||w.action==WorkerAction.FIGHT)&&w.swing>0?(float)Math.sin(strikeProgress(w,w.action==WorkerAction.FIGHT?.46f:.58f)*Math.PI):0;
+        if(beam>.12f){d.setColor(0x445DEBFF);d.strokeWidth=5f*ui*beam;d.line(w.x+dir*s*.10f,w.y-s*.38f,tx,ty);d.setColor(0xFFD3FBFF);d.strokeWidth=(1.1f+beam)*ui;d.line(w.x+dir*s*.10f,w.y-s*.38f,tx,ty);d.setColor(0xFF67E9FF);d.fillCircle(tx,ty,(2f+3f*beam)*ui);}
+        d.save();d.translate(w.x,w.y-Math.abs(stride)*.8f*ui);d.scale(dir,1);d.setColor(0x66000000);d.fillOval(-s*.50f,s*.48f,s*.50f,s*.65f);d.setColor(0xFF56636A);d.fillRoundRect(-s*.36f,-s*.02f,s*.36f,s*.44f,s*.09f);d.setColor(0xFF9EACB5);d.fillCircle(0,-s*.34f,s*.29f);d.setColor(0xFF232A2E);d.fillRect(-s*.21f,-s*.43f,s*.21f,-s*.32f);d.setColor(beam>.12f?0xFFE6FFFF:0xFF67E9FF);d.fillCircle(s*.10f,-s*.38f,s*.055f);d.setColor(0xFF3E515A);d.fillCircle(-s*.10f,-s*.38f,s*.035f);d.setColor(0xFFCAD4D9);d.pathReset();d.moveTo(-s*.20f,-s*.18f);d.lineTo(0,s*.20f);d.lineTo(s*.20f,-s*.18f);d.lineTo(s*.08f,s*.14f);d.lineTo(-s*.08f,s*.14f);d.closePath();d.fillPath();d.setColor(0xFF69757B);d.strokeWidth=s*.15f;d.line(-s*.30f,s*.04f,-s*.52f,s*.34f);d.line(s*.30f,s*.04f,s*.52f,s*.34f);d.line(-s*.15f,s*.42f,-s*.22f+stride*s*.04f,s*.66f);d.line(s*.15f,s*.42f,s*.22f-stride*s*.04f,s*.66f);d.restore();if(w.hasCargo())drawSack(d,w,s);
+    }
     private float facing(Worker w){if(Math.abs(w.vx)>1)return w.vx<0?-1:1;if(w.vein!=null&&w.action==WorkerAction.MINE)return w.vein.x<w.x?-1:1;if(w.mob!=null)return w.mob.x<w.x?-1:1;return 1;}
 
     private void drawMob(Draw d,Mob m){
@@ -1016,21 +1040,14 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void drawFloodHazard(Draw d,CaveHazard h,float warning){
-        float t=Math.max(0,h.age-1.25f),dir=(h.cell&1)==0?1f:-1f;
-        if(h.age<1.25f){
-            d.setColor(alpha(0xFF68C8EE,.22f+.38f*warning));d.strokeWidth=(2f+warning*3f)*ui;
-            for(int i=0;i<3;i++){float yy=h.y+(i-1)*h.r*.16f;d.line(h.x-dir*h.r*.72f,yy,h.x+dir*h.r*.72f,yy+(float)Math.sin(h.age*9+i)*h.r*.08f);}
-            return;
-        }
-        float width=h.r*1.10f;
-        d.setColor(0x55399CCB);d.strokeWidth=h.r*.32f;
-        for(int j=0;j<3;j++){
-            float yy=h.y+(j-1)*h.r*.13f;
-            for(int i=0;i<8;i++){float x1=h.x-width+i*(width*2/8f),x2=h.x-width+(i+1)*(width*2/8f);float wave1=(float)Math.sin((i+j*2)*1.4f+t*8f*dir)*h.r*.07f;float wave2=(float)Math.sin((i+1+j*2)*1.4f+t*8f*dir)*h.r*.07f;d.line(x1,yy+wave1,x2,yy+wave2);}
-        }
-        d.setColor(0xBBDDF8FF);d.strokeWidth=1.5f*ui;
-        for(int i=0;i<10;i++){float f=(i*.137f+t*.55f)%1f;float x=h.x-dir*width+dir*f*width*2;float y=h.y-h.r*.24f+(float)Math.sin(i*2.1f+t*7f)*h.r*.12f;d.fillCircle(x,y,(1.3f+i%3*.8f)*ui);}
-        d.setColor(0x446AD6F2);for(int i=0;i<6;i++){float f=(i*.21f+t*.9f)%1f;float x=h.x-dir*width+dir*f*width*2;d.fillOval(x-3f*ui,h.y-h.r*.42f,x+3f*ui,h.y+h.r*.30f);}
+        float t=Math.max(0,h.age-1.25f),dir=(h.cell&1)==0?1f:-1f,width=h.r*1.16f;
+        if(h.age<1.25f){d.setColor(alpha(0xFF73D1D8,.22f+.42f*warning));d.strokeWidth=(2f+warning*3f)*ui;for(int i=0;i<4;i++){float yy=h.y+(i-1.5f)*h.r*.12f;d.line(h.x-width*.72f,yy,h.x+width*.72f,yy+(float)Math.sin(h.age*10+i)*h.r*.08f);}return;}
+        d.setColor(0x66397668);d.strokeWidth=h.r*.46f;d.line(h.x-width,h.y,h.x+width,h.y);
+        d.setColor(0x88439EAF);d.strokeWidth=h.r*.34f;d.line(h.x-width,h.y,h.x+width,h.y);
+        d.setColor(0xAA68D0DB);d.strokeWidth=h.r*.10f;
+        for(int j=0;j<3;j++){float yy=h.y+(j-1)*h.r*.12f;for(int i=0;i<10;i++){float x1=h.x-width+i*(width*2/10f),x2=h.x-width+(i+1)*(width*2/10f),w1=(float)Math.sin(i*1.3f+t*7.5f*dir+j)*h.r*.055f,w2=(float)Math.sin((i+1)*1.3f+t*7.5f*dir+j)*h.r*.055f;d.line(x1,yy+w1,x2,yy+w2);}}
+        for(int i=0;i<12;i++){float q=(i*.113f+t*(.32f+.035f*(i%3)))%1f,x=h.x-width+q*width*2,y=h.y-h.r*.18f+(float)Math.sin(i*2.4f+t*5f)*h.r*.13f;d.setColor(i%3==0?0xAAE9FFFF:0x665ED5E8);d.fillCircle(x,y,(1.2f+i%3*.65f)*ui);}
+        d.setColor(0x664E9C5A);for(int i=0;i<6;i++){float q=(i*.19f+t*.05f)%1f,x=h.x-width+q*width*2;d.fillOval(x-4f*ui,h.y+h.r*.20f,x+5f*ui,h.y+h.r*.33f);}
     }
 
     private void drawFx(Draw d,Fx p){float a=Math.max(0,p.life/p.maxLife);d.setColor(alpha(p.color,a));if(p.spark){d.strokeWidth=Math.max(1f,p.size*.6f);d.line(p.x,p.y,p.x-p.vx*.025f,p.y-p.vy*.025f);}else d.fillCircle(p.x,p.y,p.size*(.45f+.55f*a));}
@@ -1123,15 +1140,15 @@ public final class CaveScreen extends ScreenAdapter {
     private void resetWorkerRoutes(){for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;w.routeRetry=0;}}
     private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityHazard=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
     private void setupObjective(){
-        if(state.depth==1)objectiveType=ObjectiveType.CLEAR_VEINS;else if(state.depth%10==0)objectiveType=ObjectiveType.BOSS_HUNT;else objectiveType=ObjectiveType.values()[Math.floorMod(state.depth+slot*3,5)];objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;
+        if(state.depth==1)objectiveType=ObjectiveType.ASCEND_GNOME;else if(state.depth%10==0)objectiveType=ObjectiveType.BOSS_HUNT;else objectiveType=ObjectiveType.values()[Math.floorMod(state.depth+slot*3,5)];objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;
         switch(objectiveType){case GUARDIAN->objectiveTarget=2+Math.min(2,state.depth/15);case DEMON_PURGE->objectiveTarget=3+Math.min(8,state.depth/3);case TREASURE->objectiveTreasureTarget=state.walletValue()+600L+state.depth*220L;default->{}}
     }
     private void updateObjective(){
         if(state.totalGnomes()<5)return;if(objectiveStarted)return;if(objectiveType==ObjectiveType.BOSS_HUNT){objectiveStarted=true;spawnBoss();}else if(objectiveType==ObjectiveType.DEMON_PURGE){objectiveStarted=true;EnemyType[] q=new EnemyType[objectiveTarget+1];for(int i=0;i<objectiveTarget;i++)q[i]=EnemyType.DEMON;q[q.length-1]=state.depth>=20?EnemyType.DEMON_KING:EnemyType.IMP_KING;openPortal(q);toast="ЗАДАНИЕ • ПЕРЕЖИТЬ НАШЕСТВИЕ";toastTime=2f;}}
     private boolean noLivingVeins(){for(Vein v:veins)if(!v.dead)return false;return true;}
     private boolean noHostiles(){if(portal!=null)return false;for(Mob m:mobs)if(!m.dead)return false;return true;}
-    private boolean levelObjectiveMet(){return switch(objectiveType){case CLEAR_VEINS->noLivingVeins();case GUARDIAN->state.guardianLevel>=objectiveTarget&&!guardianDead;case TREASURE->state.walletValue()>=objectiveTreasureTarget;case DEMON_PURGE,BOSS_HUNT->objectiveStarted&&noHostiles();};}
-    private String levelObjectiveShort(){return switch(objectiveType){case CLEAR_VEINS->"ЦЕЛЬ: ОЧИСТИТЬ ЖИЛЫ";case GUARDIAN->"ЦЕЛЬ: СТРАЖ ур."+objectiveTarget;case DEMON_PURGE->"ЦЕЛЬ: НАШЕСТВИЕ";case BOSS_HUNT->"ЦЕЛЬ: УБИТЬ БОССА";case TREASURE->"ЦЕЛЬ: КАПИТАЛ "+format(objectiveTreasureTarget);};}
+    private boolean levelObjectiveMet(){return switch(objectiveType){case ASCEND_GNOME->state.tierCounts[GnomeTier.VETERAN.ordinal()]>=1;case CLEAR_VEINS->noLivingVeins();case GUARDIAN->state.guardianLevel>=objectiveTarget&&!guardianDead;case TREASURE->state.walletValue()>=objectiveTreasureTarget;case DEMON_PURGE,BOSS_HUNT->objectiveStarted&&noHostiles();};}
+    private String levelObjectiveShort(){return switch(objectiveType){case ASCEND_GNOME->"ЦЕЛЬ: ОТКРЫТЬ ПРОДВИНУТОГО ГНОМА";case CLEAR_VEINS->"ЦЕЛЬ: ОЧИСТИТЬ ЖИЛЫ";case GUARDIAN->"ЦЕЛЬ: СТРАЖ ур."+objectiveTarget;case DEMON_PURGE->"ЦЕЛЬ: НАШЕСТВИЕ";case BOSS_HUNT->"ЦЕЛЬ: УБИТЬ БОССА";case TREASURE->"ЦЕЛЬ: КАПИТАЛ "+format(objectiveTreasureTarget);};}
     private String levelObjectiveToast(){return levelObjectiveShort();}
 
 

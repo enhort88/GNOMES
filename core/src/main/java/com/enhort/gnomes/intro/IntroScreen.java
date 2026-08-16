@@ -14,12 +14,12 @@ public final class IntroScreen extends ScreenAdapter {
             "intro/gnome_home.png", "intro/gnome_mine.png", "intro/gnome_enemies.png"
     };
     private static final String[] TITLE = {
-            "МЫ, ГНОМЫ", "КАМЕНЬ И СОКРОВИЩА", "А ЕЩЁ ДЕМОНЫ"
+            "ПОД КАМНЕМ", "НАША РАБОТА", "ТО, ЧТО ЖИВЁТ ГЛУБЖЕ"
     };
     private static final String[] BODY = {
-            "Любим тепло очага, крепкий сундук и хороший повод снова уйти под землю.",
-            "Мы копаем камень, ищем серебро, золото и алмазы. Всё найденное ещё надо донести домой.",
-            "Чем глубже шахта, тем наглее бесы, сильнее демоны и страннее твари. Поэтому кирку держим правильно."
+            "Здесь наш дом. Камень держит тепло, сундуки хранят добычу, а каждый новый тоннель становится частью поселения.",
+            "Мы режем породу, открываем жилы и уносим наверх всё ценное. Чем глубже шахта, тем богаче находки и тяжелее работа.",
+            "В глубине мы не одни. Бесы идут за золотом, демоны за гномами, а древние существа просыпаются вместе с самой горой."
     };
 
     private final GnomesGame game;
@@ -97,7 +97,7 @@ public final class IntroScreen extends ScreenAdapter {
         float yy = y;
         for (String word : words) {
             if (line.length() > 0 && line.length() + 1 + word.length() > chars) {
-                d.text(line.toString(), x, yy); yy += d.textSize * 1.55f; line.setLength(0);
+                d.text(line.toString(), x, yy); yy += d.textSize * 3.10f; line.setLength(0);
             }
             if (line.length() > 0) line.append(' ');
             line.append(word);

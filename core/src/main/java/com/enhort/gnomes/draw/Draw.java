@@ -283,7 +283,8 @@ public class Draw implements Disposable {
         BitmapFont f = bold && fontBold != null ? fontBold : font;
         if (f == null) return;
         ensure(Mode.TEXT);
-        float scale = textSize / 32f;
+        float effectiveSize = textSize * 2.0f;
+        float scale = effectiveSize / 32f;
         f.getData().setScale(scale);
         applyFontColor(f);
         float drawX = x;
@@ -291,7 +292,7 @@ public class Draw implements Disposable {
             layout.setText(f, s);
             drawX = x - layout.width * 0.5f;
         }
-        f.draw(batch, s, drawX, y - textSize * 0.78f);
+        f.draw(batch, s, drawX, y - effectiveSize * 0.78f);
     }
 
     public void image(Texture texture, float l, float t, float r, float b) {

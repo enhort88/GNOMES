@@ -34,6 +34,7 @@ public final class GnomesGame extends Game {
     }
 
     public void openMenu() { changeScreen(new MenuScreen(this)); }
+    public void openIntro() { changeScreen(new IntroScreen(this)); }
     public void playSlot(int slot) { changeScreen(new CaveScreen(this, slot)); }
     public void playNewSlot(int slot) { playNewSlot(slot, 2); }
     public void playNewSlot(int slot, int difficulty) {

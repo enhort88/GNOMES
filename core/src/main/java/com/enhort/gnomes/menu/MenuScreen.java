@@ -34,7 +34,7 @@ public final class MenuScreen extends ScreenAdapter {
     private final GnomesGame game;
     private final Random rnd=new Random(0x6E6F6D6573L);
     private final Dust[] dust=new Dust[34];
-    private final Box[] main=new Box[7];
+    private final Box[] main=new Box[6];
     private final Box[] slots=new Box[SaveRepository.SLOT_COUNT];
     private final Box[] slotDelete=new Box[SaveRepository.SLOT_COUNT];
     private final Box[] difficultyButtons={new Box(),new Box(),new Box(),new Box()};
@@ -42,6 +42,7 @@ public final class MenuScreen extends ScreenAdapter {
     private final Box yes=new Box(),no=new Box();
     private final Box infoCard=new Box();
     private final Box soundToggle=new Box(),vibrationToggle=new Box(),volumeDown=new Box(),volumeUp=new Box(),cheatG=new Box();
+    private final Box musicToggle=new Box(),musicDown=new Box(),musicUp=new Box(),introReplay=new Box();
 
     private Mode mode=Mode.MAIN;
     private float width,height,ui,elapsed;
@@ -123,14 +124,18 @@ public final class MenuScreen extends ScreenAdapter {
 
         float cardW=Math.min(width-42f*ui,340f*ui);
         float cardTop=Math.max(150f*ui,height*.30f);
-        float cardBottom=Math.min(back.t-18f*ui,cardTop+190f*ui);
+        float cardBottom=Math.min(back.t-18f*ui,cardTop+282f*ui);
         infoCard.set((width-cardW)/2f,cardTop,(width+cardW)/2f,cardBottom);
 
         float rowR=infoCard.r-14f*ui;
-        soundToggle.set(rowR-104f*ui,infoCard.t+16f*ui,rowR,infoCard.t+50f*ui);
-        vibrationToggle.set(rowR-104f*ui,infoCard.t+58f*ui,rowR,infoCard.t+92f*ui);
-        volumeDown.set(rowR-142f*ui,infoCard.t+100f*ui,rowR-100f*ui,infoCard.t+134f*ui);
-        volumeUp.set(rowR-42f*ui,infoCard.t+100f*ui,rowR,infoCard.t+134f*ui);
+        musicToggle.set(rowR-104f*ui,infoCard.t+12f*ui,rowR,infoCard.t+44f*ui);
+        musicDown.set(rowR-142f*ui,infoCard.t+50f*ui,rowR-100f*ui,infoCard.t+82f*ui);
+        musicUp.set(rowR-42f*ui,infoCard.t+50f*ui,rowR,infoCard.t+82f*ui);
+        soundToggle.set(rowR-104f*ui,infoCard.t+94f*ui,rowR,infoCard.t+126f*ui);
+        volumeDown.set(rowR-142f*ui,infoCard.t+132f*ui,rowR-100f*ui,infoCard.t+164f*ui);
+        volumeUp.set(rowR-42f*ui,infoCard.t+132f*ui,rowR,infoCard.t+164f*ui);
+        vibrationToggle.set(rowR-104f*ui,infoCard.t+176f*ui,rowR,infoCard.t+208f*ui);
+        introReplay.set(infoCard.l+14f*ui,infoCard.t+222f*ui,infoCard.r-14f*ui,infoCard.t+260f*ui);
         // GNOMES is centered at y=74. This box covers only the first G, not the whole title.
         cheatG.set(width/2f-86f*ui,44f*ui,width/2f-45f*ui,96f*ui);
     }
@@ -218,11 +223,10 @@ public final class MenuScreen extends ScreenAdapter {
         heading(d,"DEEP MINE • ALPHA 0.5");
         button(d,main[0],"ИГРАТЬ",true,UiTheme.GOLD,false,1f);
         button(d,main[1],"ПРОДОЛЖИТЬ",game.saves.anySave(),UiTheme.GREEN,false,.94f);
-        button(d,main[2],"СОХРАНЕНИЯ",true,UiTheme.STEEL,false,.92f);
-        button(d,main[3],"НАСТРОЙКИ",true,UiTheme.STEEL,false,.92f);
-        button(d,main[4],"БЕСТИАРИЙ",true,UiTheme.COPPER,false,.92f);
-        button(d,main[5],"ОБ ИГРЕ",true,UiTheme.COPPER,false,.92f);
-        button(d,main[6],"ВЫХОД",true,UiTheme.RED,false,.92f);
+        button(d,main[2],"НАСТРОЙКИ",true,UiTheme.STEEL,false,.92f);
+        button(d,main[3],"БЕСТИАРИЙ",true,UiTheme.COPPER,false,.92f);
+        button(d,main[4],"ОБ ИГРЕ",true,UiTheme.COPPER,false,.92f);
+        button(d,main[5],"ВЫХОД",true,UiTheme.RED,false,.92f);
         if(game.settings.freeShop||cheatNotice>0){
             d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.5f*ui;
             d.setColor(game.settings.freeShop?0xFFFFC74A:0xFF8D979D);
@@ -256,12 +260,12 @@ public final class MenuScreen extends ScreenAdapter {
     private void difficulty(Draw d){
         heading(d,"СЛОЖНОСТЬ ЭКСПЕДИЦИИ");
         d.align=Draw.Align.CENTER;d.textSize=7.8f*ui;d.setColor(0xFF9EAAAF);
-        d.text("Деньги делятся по сложности, а половина отряда идёт глубже.",width/2,128f*ui);
+        d.text("Выберите, насколько суровой будет экспедиция.",width/2,128f*ui);
         d.align=Draw.Align.LEFT;
-        button(d,difficultyButtons[0],"ЛЁГКАЯ  •  перенос 1/2",true,UiTheme.GREEN,false,.82f);
-        button(d,difficultyButtons[1],"СРЕДНЯЯ  •  перенос 1/3",true,UiTheme.GOLD,false,.82f);
-        button(d,difficultyButtons[2],"СЛОЖНАЯ  •  перенос 1/4",true,UiTheme.COPPER,false,.82f);
-        button(d,difficultyButtons[3],"БЕЗ ПЕРЕНОСА  •  0",true,UiTheme.RED,false,.82f);
+        button(d,difficultyButtons[0],"ЛЁГКАЯ",true,UiTheme.GREEN,false,.90f);
+        button(d,difficultyButtons[1],"СРЕДНЯЯ",true,UiTheme.GOLD,false,.90f);
+        button(d,difficultyButtons[2],"СЛОЖНАЯ",true,UiTheme.COPPER,false,.90f);
+        button(d,difficultyButtons[3],"ХАРДКОР",true,UiTheme.RED,false,.90f);
         button(d,back,"НАЗАД",true,UiTheme.STEEL,false,.92f);
     }
 
@@ -276,9 +280,9 @@ public final class MenuScreen extends ScreenAdapter {
         for(int i=0;i<all.length;i++){
             EnemyType e=all[i];int col=i/5,ri=i%5;float x=col==0?l+10f*ui:mid+12f*ui,y=t+11f*ui+ri*row;
             int unlock=enemyUnlock(e);boolean known=deepest>=unlock||game.settings.freeShop;
-            drawEnemyStamp(d,e,x+14f*ui,y+20f*ui,known);
-            d.bold=true;d.textSize=7.6f*ui;d.setColor(known?0xFF3B2A20:0xFF95876F);d.text(known?e.title.toUpperCase():"???",x+31f*ui,y+13f*ui);
-            d.bold=false;d.textSize=6.2f*ui;d.setColor(known?0xFF6B5844:0xFF9C907C);
+            drawEnemyPortrait(d,e,x+14f*ui,y+22f*ui,known);
+            d.bold=true;d.textSize=6.8f*ui;d.setColor(known?0xFF3B2A20:0xFF95876F);d.text(known?e.title.toUpperCase():"???",x+31f*ui,y+13f*ui);
+            d.bold=false;d.textSize=5.4f*ui;d.setColor(known?0xFF6B5844:0xFF9C907C);
             d.text(known?enemyRole(e):"встречается глубже",x+31f*ui,y+29f*ui);
             if(known){d.text("база HP "+Math.round(e.hp),x+31f*ui,y+43f*ui);}
         }
@@ -288,30 +292,57 @@ public final class MenuScreen extends ScreenAdapter {
 
     private int enemyUnlock(EnemyType e){return switch(e){case IMP->1;case GHOST->2;case DEMON->7;case SUCCUBUS->9;case IMP_KING->10;case STONE_GOLEM->12;case WATER_GOLEM->15;case FIRE_GOLEM->18;case DEMON_KING->20;case ELEMENTAL_KING->30;};}
     private String enemyRole(EnemyType e){return switch(e){case IMP->"вор • боится отпора";case DEMON->"охотник на гномов";case SUCCUBUS->"чары • сеет драку";case GHOST->"летает сквозь стены";case STONE_GOLEM->"тяжёлый элементаль";case WATER_GOLEM->"водный элементаль";case FIRE_GOLEM->"не боится лавы";case IMP_KING->"босс • вор и призыватель";case DEMON_KING->"босс • убийца";case ELEMENTAL_KING->"босс • стихии";};}
-    private void drawEnemyStamp(Draw d,EnemyType e,float x,float y,boolean known){
-        int c=known?e.color:0xFF9B8F79;d.setColor(0x33614A31);d.fillCircle(x,y,13f*ui);d.setColor(c);d.fillCircle(x,y,known?7f*ui:5f*ui);
-        if(known&&e.isImp()){d.pathReset();d.moveTo(x-6f*ui,y-5f*ui);d.lineTo(x-11f*ui,y-12f*ui);d.lineTo(x-2f*ui,y-8f*ui);d.closePath();d.fillPath();d.pathReset();d.moveTo(x+6f*ui,y-5f*ui);d.lineTo(x+11f*ui,y-12f*ui);d.lineTo(x+2f*ui,y-8f*ui);d.closePath();d.fillPath();}
-        if(!known){d.bold=true;d.textSize=8f*ui;d.setColor(0xFFF0E1B8);d.align=Draw.Align.CENTER;d.text("?",x,y+3f*ui);d.align=Draw.Align.LEFT;d.bold=false;}
+    private void drawEnemyPortrait(Draw d,EnemyType e,float x,float y,boolean known){
+        float s=12f*ui;
+        d.save();d.translate(x,y);
+        if(!known){d.setColor(0x55614A31);d.fillRoundRect(-s,-s,s,s,5f*ui);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=8f*ui;d.setColor(0xFF7C6E5B);d.text("?",0,4f*ui);d.align=Draw.Align.LEFT;d.bold=false;d.restore();return;}
+        d.setColor(0x44201916);d.fillOval(-s*.9f,s*.65f,s*.9f,s*.95f);
+        switch(e){
+            case IMP,IMP_KING -> {
+                d.setColor(0xFF8E251F);d.fillOval(-s*.55f,-s*.25f,s*.55f,s*.72f);d.setColor(e.color);d.fillCircle(0,-s*.38f,s*.46f);
+                d.pathReset();d.moveTo(-s*.28f,-s*.66f);d.lineTo(-s*.76f,-s*.98f);d.lineTo(-s*.48f,-s*.43f);d.closePath();d.fillPath();
+                d.pathReset();d.moveTo(s*.28f,-s*.66f);d.lineTo(s*.76f,-s*.98f);d.lineTo(s*.48f,-s*.43f);d.closePath();d.fillPath();
+                d.setColor(0xFFFFE46B);d.fillCircle(-s*.16f,-s*.42f,s*.055f);d.fillCircle(s*.16f,-s*.42f,s*.055f);
+                if(e==EnemyType.IMP_KING)miniCrown(d,0,-s*.93f,s*.72f);
+            }
+            case DEMON,DEMON_KING -> {
+                d.setColor(0xFF631B20);d.fillRoundRect(-s*.62f,-s*.05f,s*.62f,s*.70f,s*.18f);d.setColor(e.color);d.fillCircle(0,-s*.44f,s*.48f);
+                d.setColor(0xFF2A1717);d.strokeWidth=s*.16f;d.line(-s*.24f,-s*.64f,-s*.74f,-s*.98f);d.line(s*.24f,-s*.64f,s*.74f,-s*.98f);
+                d.setColor(0xFFFFB84E);d.fillCircle(-s*.17f,-s*.45f,s*.05f);d.fillCircle(s*.17f,-s*.45f,s*.05f);
+                if(e==EnemyType.DEMON_KING)miniCrown(d,0,-s*.98f,s*.80f);
+            }
+            case SUCCUBUS -> {
+                d.setColor(0xFF6B2448);d.pathReset();d.moveTo(-s*.16f,-s*.10f);d.lineTo(-s*.90f,-s*.62f);d.lineTo(-s*.66f,s*.35f);d.closePath();d.fillPath();d.pathReset();d.moveTo(s*.16f,-s*.10f);d.lineTo(s*.90f,-s*.62f);d.lineTo(s*.66f,s*.35f);d.closePath();d.fillPath();
+                d.setColor(0xFFC94979);d.fillOval(-s*.38f,-s*.08f,s*.38f,s*.70f);d.setColor(0xFFE7B3A3);d.fillCircle(0,-s*.42f,s*.36f);d.setColor(0xFF2C1823);d.fillOval(-s*.38f,-s*.76f,s*.38f,-s*.34f);
+            }
+            case GHOST -> {
+                d.setColor(0x774AD7E3);d.fillCircle(0,-s*.34f,s*.40f);d.pathReset();d.moveTo(-s*.48f,-s*.12f);d.quadTo(-s*.65f,s*.42f,-s*.34f,s*.78f);d.lineTo(-s*.06f,s*.54f);d.lineTo(s*.18f,s*.78f);d.lineTo(s*.48f,s*.42f);d.quadTo(s*.62f,s*.05f,s*.42f,-s*.12f);d.closePath();d.fillPath();d.setColor(0xFFE7FFFF);d.fillCircle(-s*.13f,-s*.39f,s*.04f);d.fillCircle(s*.13f,-s*.39f,s*.04f);
+            }
+            case STONE_GOLEM,WATER_GOLEM,FIRE_GOLEM,ELEMENTAL_KING -> {
+                int base=e==EnemyType.STONE_GOLEM?0xFF625D55:e==EnemyType.WATER_GOLEM?0xFF397EA8:e==EnemyType.FIRE_GOLEM?0xFFB74620:0xFF625AA9;
+                d.setColor(base);d.fillRoundRect(-s*.57f,-s*.16f,s*.57f,s*.60f,s*.13f);d.fillCircle(0,-s*.47f,s*.42f);d.fillCircle(-s*.64f,s*.08f,s*.22f);d.fillCircle(s*.64f,s*.08f,s*.22f);
+                d.setColor(e==EnemyType.FIRE_GOLEM?0xFFFFD34E:0xFFBFF5FF);d.fillCircle(-s*.14f,-s*.48f,s*.045f);d.fillCircle(s*.14f,-s*.48f,s*.045f);
+                if(e==EnemyType.WATER_GOLEM){d.setColor(0x885BD3F2);d.strokeWidth=1.3f*ui;d.line(-s*.45f,s*.40f,s*.45f,s*.32f);}
+                if(e==EnemyType.FIRE_GOLEM){d.setColor(0x88FF6A22);d.fillCircle(0,s*.20f,s*.18f);}
+                if(e==EnemyType.ELEMENTAL_KING)miniCrown(d,0,-s*.96f,s*.85f);
+            }
+        }
+        d.restore();
     }
+    private void miniCrown(Draw d,float x,float y,float w){d.setColor(0xFFD9A62E);d.pathReset();d.moveTo(x-w*.45f,y+w*.22f);d.lineTo(x-w*.38f,y-w*.18f);d.lineTo(x-w*.13f,y+w*.02f);d.lineTo(x,y-w*.30f);d.lineTo(x+w*.15f,y+w*.02f);d.lineTo(x+w*.40f,y-w*.18f);d.lineTo(x+w*.45f,y+w*.22f);d.closePath();d.fillPath();}
 
     private void settings(Draw d){
-        heading(d,"НАСТРОЙКИ");
-        card(d,infoCard);
-        float lx=infoCard.l+16f*ui;
-        d.bold=true;d.textSize=8.8f*ui;d.setColor(0xFFE7E2D7);
-        d.text("ЗВУКИ",lx,infoCard.t+38f*ui);
-        d.text("ВИБРАЦИЯ",lx,infoCard.t+80f*ui);
-        d.text("ГРОМКОСТЬ",lx,infoCard.t+122f*ui);
-        d.bold=false;
-        button(d,soundToggle,game.settings.soundEnabled?"ВКЛ":"ВЫКЛ",true,game.settings.soundEnabled?UiTheme.GREEN:UiTheme.STEEL,false,.82f);
-        button(d,vibrationToggle,game.settings.vibrationEnabled?"ВКЛ":"ВЫКЛ",true,game.settings.vibrationEnabled?UiTheme.GREEN:UiTheme.STEEL,false,.82f);
-        button(d,volumeDown,"−",game.settings.soundVolume>0.01f,UiTheme.COPPER,false,1f);
-        button(d,volumeUp,"+",game.settings.soundVolume<.99f,UiTheme.COPPER,false,1f);
-        d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.8f*ui;d.setColor(UiTheme.GOLD);
-        d.text(Math.round(game.settings.soundVolume*100)+"%",(volumeDown.r+volumeUp.l)/2f,volumeDown.cy()+3f*ui);
-        d.align=Draw.Align.LEFT;d.bold=false;
-        d.textSize=7.3f*ui;d.setColor(0xFF89949A);d.text("SFX шахты, боя и интерфейса",lx,infoCard.t+155f*ui);
-        if(game.settings.freeShop){d.setColor(0xFFFFC74A);d.text("TEST MODE: покупки бесплатны",lx,infoCard.t+176f*ui);}
+        heading(d,"НАСТРОЙКИ");card(d,infoCard);float lx=infoCard.l+16f*ui;
+        d.bold=true;d.textSize=7.5f*ui;d.setColor(0xFFE7E2D7);
+        d.text("МУЗЫКА",lx,infoCard.t+34f*ui);d.text("ГРОМКОСТЬ МУЗЫКИ",lx,infoCard.t+74f*ui);
+        d.text("ЗВУКИ",lx,infoCard.t+116f*ui);d.text("ГРОМКОСТЬ SFX",lx,infoCard.t+156f*ui);d.text("ВИБРАЦИЯ",lx,infoCard.t+198f*ui);d.bold=false;
+        button(d,musicToggle,game.settings.musicEnabled?"ВКЛ":"ВЫКЛ",true,game.settings.musicEnabled?UiTheme.GREEN:UiTheme.STEEL,false,.75f);
+        button(d,musicDown,"−",game.settings.musicVolume>.01f,UiTheme.COPPER,false,1f);button(d,musicUp,"+",game.settings.musicVolume<.99f,UiTheme.COPPER,false,1f);
+        button(d,soundToggle,game.settings.soundEnabled?"ВКЛ":"ВЫКЛ",true,game.settings.soundEnabled?UiTheme.GREEN:UiTheme.STEEL,false,.75f);
+        button(d,volumeDown,"−",game.settings.soundVolume>.01f,UiTheme.COPPER,false,1f);button(d,volumeUp,"+",game.settings.soundVolume<.99f,UiTheme.COPPER,false,1f);
+        button(d,vibrationToggle,game.settings.vibrationEnabled?"ВКЛ":"ВЫКЛ",true,game.settings.vibrationEnabled?UiTheme.GREEN:UiTheme.STEEL,false,.75f);
+        d.align=Draw.Align.CENTER;d.bold=true;d.textSize=6.7f*ui;d.setColor(UiTheme.GOLD);d.text(Math.round(game.settings.musicVolume*100)+"%",(musicDown.r+musicUp.l)/2f,musicDown.cy()+3f*ui);d.text(Math.round(game.settings.soundVolume*100)+"%",(volumeDown.r+volumeUp.l)/2f,volumeDown.cy()+3f*ui);d.align=Draw.Align.LEFT;d.bold=false;
+        button(d,introReplay,"ПРОИГРАТЬ ВСТУПЛЕНИЕ",true,UiTheme.GOLD,false,.72f);
         button(d,back,"НАЗАД",true,UiTheme.STEEL,false,.92f);
     }
 
@@ -354,12 +385,12 @@ public final class MenuScreen extends ScreenAdapter {
                 if(gTapCount>=10){gTapCount=0;game.settings.toggleFreeShop();game.syncCheats();cheatNotice=2.6f;game.audio.play(GameAudio.Sfx.COIN,.95f);game.audio.vibrate(70);}
                 return;
             }
-            if(main[0].hit(x,y)||main[2].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SLOTS;return;}
+            if(main[0].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SLOTS;return;}
             if(main[1].hit(x,y)&&game.saves.anySave()){game.audio.play(GameAudio.Sfx.UI,.5f);game.playSlot(game.saves.lastSlot());return;}
-            if(main[3].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SETTINGS;return;}
-            if(main[4].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.BESTIARY;return;}
-            if(main[5].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.ABOUT;return;}
-            if(main[6].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);Gdx.app.exit();return;}
+            if(main[2].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.SETTINGS;return;}
+            if(main[3].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.BESTIARY;return;}
+            if(main[4].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);mode=Mode.ABOUT;return;}
+            if(main[5].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.5f);Gdx.app.exit();return;}
         }else if(mode==Mode.SLOTS){
             for(int i=0;i<slots.length;i++){
                 int slot=i+1;
@@ -379,10 +410,14 @@ public final class MenuScreen extends ScreenAdapter {
         }else if(mode==Mode.BESTIARY){
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
         }else if(mode==Mode.SETTINGS){
-            if(soundToggle.hit(x,y)){game.settings.toggleSound();game.audio.refreshMusic();if(game.settings.soundEnabled)game.audio.play(GameAudio.Sfx.UI,.75f);return;}
+            if(musicToggle.hit(x,y)){game.settings.toggleMusic();game.audio.refreshMusic();return;}
+            if(musicDown.hit(x,y)){game.settings.setMusicVolume(game.settings.musicVolume-.10f);game.audio.refreshMusic();return;}
+            if(musicUp.hit(x,y)){game.settings.setMusicVolume(game.settings.musicVolume+.10f);game.audio.refreshMusic();return;}
+            if(soundToggle.hit(x,y)){game.settings.toggleSound();if(game.settings.soundEnabled)game.audio.play(GameAudio.Sfx.UI,.75f);return;}
             if(vibrationToggle.hit(x,y)){game.settings.toggleVibration();if(game.settings.vibrationEnabled)game.audio.vibrate(45);game.audio.play(GameAudio.Sfx.UI,.5f);return;}
-            if(volumeDown.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume-.10f);game.audio.refreshMusic();game.audio.play(GameAudio.Sfx.UI,.6f);return;}
-            if(volumeUp.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume+.10f);game.audio.refreshMusic();game.audio.play(GameAudio.Sfx.UI,.6f);return;}
+            if(volumeDown.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume-.10f);game.audio.play(GameAudio.Sfx.UI,.6f);return;}
+            if(volumeUp.hit(x,y)){game.settings.setSoundVolume(game.settings.soundVolume+.10f);game.audio.play(GameAudio.Sfx.UI,.6f);return;}
+            if(introReplay.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.6f);game.openIntro();return;}
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
         }else if(mode==Mode.ABOUT){
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
@@ -398,7 +433,7 @@ public final class MenuScreen extends ScreenAdapter {
         return(a<<24)|(r<<16)|(g<<8)|b;
     }
 
-    private static String difficultyShort(int d){return switch(d){case 1->"лёгк.";case 3->"сложн.";case 4->"без перен.";default->"средн.";};}
+    private static String difficultyShort(int d){return switch(d){case 1->"лёгк.";case 3->"сложн.";case 4->"хардкор";default->"средн.";};}
 
     private static String fmt(long n){
         if(n>=1_000_000_000L)return String.format(java.util.Locale.US,"%.1fB",n/1_000_000_000d);
