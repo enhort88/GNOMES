@@ -17,8 +17,12 @@ public final class SaveRepository {
         return valid(slot) && prefs.contains(key(slot));
     }
 
-    public GameState fresh(int slot) {
-        return new GameState();
+    public GameState fresh(int slot) { return fresh(slot, 2); }
+
+    public GameState fresh(int slot, int difficulty) {
+        GameState state = new GameState();
+        state.setDifficulty(difficulty);
+        return state;
     }
 
     public GameState load(int slot) {
@@ -87,6 +91,9 @@ public final class SaveRepository {
         public int enemiesDefeated;
         public int gnomesLost;
         public long stolenValue;
+        public int difficulty;
+        public long levelEarnedValue;
+        public long levelInvestedValue;
         public int[] tierCounts;
         public int[] tierLevels;
         public int[] artifactLevels;
@@ -115,6 +122,9 @@ public final class SaveRepository {
             s.enemiesDefeated = st.enemiesDefeated;
             s.gnomesLost = st.gnomesLost;
             s.stolenValue = st.stolenValue;
+            s.difficulty = st.difficulty;
+            s.levelEarnedValue = st.levelEarnedValue;
+            s.levelInvestedValue = st.levelInvestedValue;
             s.tierCounts = st.tierCounts.clone();
             s.tierLevels = st.tierLevels.clone();
             s.artifactLevels = st.artifactLevels.clone();
@@ -142,6 +152,9 @@ public final class SaveRepository {
             st.enemiesDefeated = Math.max(0, enemiesDefeated);
             st.gnomesLost = Math.max(0, gnomesLost);
             st.stolenValue = Math.max(0, stolenValue);
+            st.setDifficulty(difficulty >= 1 && difficulty <= 4 ? difficulty : 2);
+            st.levelEarnedValue = Math.max(0L, levelEarnedValue);
+            st.levelInvestedValue = Math.max(0L, levelInvestedValue);
             copy(tierCounts, st.tierCounts);
             copy(tierLevels, st.tierLevels);
             copy(artifactLevels, st.artifactLevels);

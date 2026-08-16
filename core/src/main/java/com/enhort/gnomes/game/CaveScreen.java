@@ -29,7 +29,7 @@ import java.util.Random;
  */
 public final class CaveScreen extends ScreenAdapter {
     private enum WorkerAction { IDLE, WALK, CARRY, MINE, FIGHT, STUNNED }
-    private enum PriorityKind { NONE, VEIN, MOB, POINT }
+    private enum PriorityKind { NONE, VEIN, MOB, HAZARD, POINT }
     private enum Tab { GNOMES, UPGRADES, ARTIFACTS, RUNES }
 
     private static final class Box {
@@ -45,7 +45,7 @@ public final class CaveScreen extends ScreenAdapter {
         final int visualId;
         GnomeTier tier;
         float x,y,vx,vy;
-        float phase, walkCycle, swing, attackCooldown, stun, routeRetry;
+        float phase, walkCycle, swing, attackCooldown, stun, routeRetry, spawn=.52f;
         boolean hitApplied;
         WorkerAction action=WorkerAction.IDLE;
         int[] path=new int[0];
@@ -65,14 +65,14 @@ public final class CaveScreen extends ScreenAdapter {
         final RockType type;
         final int cell, side, seed;
         final float x,y,r,maxHp;
-        float hp, hitFlash, death;
+        float hp, hitFlash, death, spawn=.38f;
         boolean dead;
         Vein(RockType type,int cell,int side,int seed,float x,float y,float r,float hp){this.type=type;this.cell=cell;this.side=side;this.seed=seed;this.x=x;this.y=y;this.r=r;this.maxHp=hp;this.hp=hp;}
     }
 
     private static final class Mob {
         final EnemyType type;
-        float x,y,hp,maxHp,phase,walkCycle,attack,attackCooldown,summonCooldown=5f,routeTimer;
+        float x,y,hp,maxHp,phase,walkCycle,attack,attackCooldown,summonCooldown=5f,routeTimer,spawn=.65f;
         int[] path=new int[0]; int pathIndex; int goalCell=-1;
         Worker target;
         boolean dead;
@@ -88,7 +88,7 @@ public final class CaveScreen extends ScreenAdapter {
 
     private static final class CaveHazard {
         final HazardType type; final int cell; final float x,y,r;
-        float age; boolean fired, obstacleActive;
+        float age,rubbleHp,rubbleMaxHp; boolean fired,obstacleActive,cleared;
         CaveHazard(HazardType type,int cell,float x,float y,float r){this.type=type;this.cell=cell;this.x=x;this.y=y;this.r=r;}
     }
 
@@ -111,9 +111,16 @@ public final class CaveScreen extends ScreenAdapter {
     private PriorityKind priorityKind=PriorityKind.NONE;
     private Vein priorityVein;
     private Mob priorityMob;
+    private CaveHazard priorityHazard;
     private int priorityCell=-1;
     private float priorityX,priorityY,priorityPulse;
     private boolean objectiveReminderShown;
+    private boolean worldTouchActive,longPressEligible,longPressHandled;
+    private float worldTouchStarted,worldTouchX,worldTouchY;
+    private boolean levelSummary,gameOver;
+    private float summaryAnim,guardianAttackAnim,guardianSpawnAnim;
+    private long summaryEarned,summaryInvested,summaryWallet,summaryCapital,summaryTransfer;
+    private final Box summaryOk=new Box(),gameOverOk=new Box();
     private Tab tab=Tab.GNOMES;
     private int selectedTier,selectedArtifact,selectedRune,runeTarget;
     private int nextWorkerId=1;
@@ -135,12 +142,21 @@ public final class CaveScreen extends ScreenAdapter {
             @Override public boolean keyDown(int keycode){if(keycode==Input.Keys.BACK||keycode==Input.Keys.ESCAPE){saveNow();game.openMenu();return true;}return false;}
             @Override public boolean touchDown(int sx,int sy,int pointer,int button){
                 float x=sx,y=sy;
+                if(levelSummary){if(summaryOk.hit(x,y)&&summaryAnim>.75f)finishLevelTransition();return true;}
+                if(gameOver){if(gameOverOk.hit(x,y)){saveNow();game.openMenu();}return true;}
                 if(speed.hit(x,y)){speedHeld=true;game.audio.play(GameAudio.Sfx.UI,.55f);return true;}
-                if(y>=worldT&&y<=worldB)return handleWorldTap(x,y);
+                if(y>=worldT&&y<=worldB){
+                    worldTouchActive=true;longPressEligible=true;longPressHandled=false;worldTouchStarted=elapsed;worldTouchX=x;worldTouchY=y;
+                    return handleWorldTap(x,y);
+                }
                 return handleTap(x,y);
             }
-            @Override public boolean touchUp(int sx,int sy,int pointer,int button){speedHeld=false;return true;}
-            @Override public boolean touchDragged(int sx,int sy,int pointer){if(!speed.hit(sx,sy))speedHeld=false;return true;}
+            @Override public boolean touchUp(int sx,int sy,int pointer,int button){speedHeld=false;worldTouchActive=false;longPressEligible=false;return true;}
+            @Override public boolean touchDragged(int sx,int sy,int pointer){
+                if(!speed.hit(sx,sy))speedHeld=false;
+                if(worldTouchActive&&distance(worldTouchX,worldTouchY,sx,sy)>16f*ui)longPressEligible=false;
+                return true;
+            }
         });
     }
 
@@ -184,12 +200,15 @@ public final class CaveScreen extends ScreenAdapter {
         float row2=Math.min(actionsBottom,actionsTop+rowH+gap);
         tertiary.set(side,row2,mid,actionsBottom);
         quaternary.set(mid+colGap,row2,width-side,actionsBottom);
+        float ow=Math.min(width-54f*ui,330f*ui),ox=(width-ow)/2f;
+        summaryOk.set(ox,height*.69f,ox+ow,height*.69f+48f*ui);
+        gameOverOk.set(ox,height*.66f,ox+ow,height*.66f+48f*ui);
     }
 
     private void generateDepth(boolean advance){
         if(width<=0||height<=0)return;
         if(advance){state.depth++;state.depthProgress=0;saveNow();}
-        mobs.clear();hazards.clear();fx.clear();veins.clear();clearPriority(false);objectiveReminderShown=false;
+        mobs.clear();hazards.clear();fx.clear();veins.clear();clearPriority(false);objectiveReminderShown=false;levelSummary=false;gameOver=false;summaryAnim=0;
         int cols=9;
         int rows=Math.max(9,Math.min(13,Math.round((worldB-worldT)/(width/cols))));
         long seed=0x9E3779B97F4A7C15L^(long)slot*0xBF58476D1CE4E5B9L^(long)state.depth*0x94D049BB133111EBL;
@@ -201,29 +220,30 @@ public final class CaveScreen extends ScreenAdapter {
         enemyTimer=Math.max(8f,17f-state.depth*.12f)+random.nextFloat()*8f;
         hazardTimer=15f+random.nextFloat()*12f;
         levelClearTimer=-1f;
-        toast="ГЛУБИНА "+state.depth;toastTime=2.4f;
+        toast="ГЛУБИНА "+state.depth+(map.style==CaveMap.Style.RING?" • КОЛЬЦЕВАЯ ШАХТА":"");toastTime=2.4f;
         if(state.depth%10==0)spawnBoss();
     }
 
     private void buildVeins(){
-        List<Integer> candidates=new ArrayList<>(map.deadEnds());
-        for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){
-            int idx=map.index(c,r);
-            if(idx==map.index(map.startCol,map.startRow)||candidates.contains(idx))continue;
-            if(((idx*37+state.depth*11)%5)==0)candidates.add(idx);
-        }
+        List<Integer> candidates=new ArrayList<>();
+        int start=map.index(map.startCol,map.startRow);
+        // Dead ends remain attractive ore pockets, but every level shuffles the full mine so deposits do not
+        // appear in the same visual slots over and over.
+        candidates.addAll(map.deadEnds());
+        for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){int idx=map.index(c,r);if(idx!=start&&!candidates.contains(idx))candidates.add(idx);}
+        java.util.Collections.shuffle(candidates,random);
         int target=Math.min(candidates.size(),Math.max(11,12+state.depth/4));
         for(int i=0;i<target;i++){
-            int cell=candidates.get(i);
-            int c=map.col(cell),r=map.row(cell);
-            int side=map.preferredSolidSide(c,r,i*71+state.depth);
-            float pocket=Math.min(cellW,cellH)*.28f;
-            float x=cx(c)+CaveMap.dx(side)*pocket;
-            float y=cy(r)+CaveMap.dy(side)*pocket;
+            int cell=candidates.get(i),c=map.col(cell),r=map.row(cell);
+            int side=map.preferredSolidSide(c,r,random.nextInt());
+            float pocket=Math.min(cellW,cellH)*(.22f+random.nextFloat()*.12f);
+            float tangent=(random.nextFloat()-.5f)*Math.min(cellW,cellH)*.28f;
+            float x=cx(c)+CaveMap.dx(side)*pocket+(side==CaveMap.N||side==CaveMap.S?tangent:0);
+            float y=cy(r)+CaveMap.dy(side)*pocket+(side==CaveMap.E||side==CaveMap.W?tangent:0);
             RockType type=chooseRockType(i);
-            float radius=Math.min(cellW,cellH)*(.20f+random.nextFloat()*.055f);
+            float radius=Math.min(cellW,cellH)*(.19f+random.nextFloat()*.075f);
             float hp=type.hp*(1f+Math.max(0,state.depth-1)*.055f);
-            veins.add(new Vein(type,cell,side,random.nextInt(),x,y,radius,hp));
+            Vein v=new Vein(type,cell,side,random.nextInt(),x,y,radius,hp);v.spawn=.20f+random.nextFloat()*.38f;veins.add(v);
         }
     }
 
@@ -240,7 +260,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void syncWorkers(boolean resetPositions){
         if(resetPositions)workers.clear();
         for(int ti=0;ti<GnomeTier.values().length;ti++){
-            GnomeTier tier=GnomeTier.values()[ti];int want=Math.min(48,state.tierCounts[ti]),have=0;
+            GnomeTier tier=GnomeTier.values()[ti];int want=state.tierCounts[ti],have=0;
             for(Worker w:workers)if(w.tier==tier)have++;
             while(have<want){spawnWorker(tier);have++;}
             if(have>want){for(Iterator<Worker>it=workers.iterator();it.hasNext()&&have>want;){if(it.next().tier==tier){it.remove();have--;}}}
@@ -260,17 +280,20 @@ public final class CaveScreen extends ScreenAdapter {
         Draw d=game.draw;d.beginFrame();
         if(screenShake>0){float sx=(float)Math.sin(elapsed*71f)*screenShake,sy=(float)Math.cos(elapsed*53f)*screenShake*.55f;d.save();d.translate(sx,sy);drawWorld(d);d.restore();}
         else drawWorld(d);
-        drawHud(d);drawPanel(d);drawToast(d);d.endFrame();
+        drawHud(d);drawPanel(d);drawToast(d);if(levelSummary)drawLevelSummary(d);if(gameOver)drawGameOver(d);d.endFrame();
     }
 
     private void update(float dt,float workerTimeScale){
         if(map==null)return;
         if(toastTime>0)toastTime-=dt;
         priorityPulse+=dt;
+        guardianAttackAnim=Math.max(0,guardianAttackAnim-dt);
+        guardianSpawnAnim=Math.max(0,guardianSpawnAnim-dt);
         if(screenShake>0)screenShake=Math.max(0,screenShake-dt*18f*ui);
+        checkLongPress();
+        if(levelSummary){summaryAnim=Math.min(3f,summaryAnim+dt);updateFx(dt);return;}
+        if(gameOver){updateFx(dt);return;}
 
-        // Acceleration belongs to the workforce, not to the universe. Enemies, hazards, regeneration,
-        // boss summons, save cadence and level transitions continue in real game time.
         updateVeins(dt);
         updateGuardian(dt);
         updateMobs(dt);
@@ -282,21 +305,25 @@ public final class CaveScreen extends ScreenAdapter {
         if(enemyTimer<=0){spawnEnemyWave();enemyTimer=Math.max(8f,24f-state.depth*.25f)+random.nextFloat()*10f;}
         if(hazardTimer<=0){spawnHazard();hazardTimer=20f+random.nextFloat()*18f;}
         if(saveTimer>=4f){saveNow();saveTimer=0;}
+
+        if(state.totalGnomes()==0&&!state.canBuyMiner()){beginGameOver();return;}
         boolean any=false;for(Vein v:veins)if(!v.dead){any=true;break;}
-        if(!any&&levelClearTimer<0){
-            if(levelObjectiveMet()){
-                levelClearTimer=1.4f;toast="УРОВЕНЬ ПРОЙДЕН";toastTime=1.4f;
-            }else if(!objectiveReminderShown){
-                objectiveReminderShown=true;toast=levelObjectiveToast();toastTime=2.4f;
-            }
+        if(!any){
+            if(levelObjectiveMet())beginLevelSummary();
+            else if(!objectiveReminderShown){objectiveReminderShown=true;toast=levelObjectiveToast();toastTime=2.4f;}
         }
-        if(levelClearTimer>=0){levelClearTimer-=dt;if(levelClearTimer<=0)generateDepth(true);}
+    }
+
+    private void checkLongPress(){
+        if(worldTouchActive&&longPressEligible&&!longPressHandled&&elapsed-worldTouchStarted>=.58f){
+            longPressHandled=true;clearPriority(true);resetWorkerRoutes();game.audio.vibrate(24);
+        }
     }
 
     private void updateVeins(float dt){
         float suppression=state.regenSuppression();
         for(Vein v:veins){
-            v.hitFlash=Math.max(0,v.hitFlash-dt);
+            v.hitFlash=Math.max(0,v.hitFlash-dt);v.spawn=Math.max(0,v.spawn-dt);
             if(v.dead){v.death+=dt;continue;}
             if(v.type.regenPerSecond>0&&v.hp<v.maxHp){float regen=v.type.regenPerSecond*(1-suppression)*(1+state.depth*.02f);v.hp=Math.min(v.maxHp,v.hp+regen*dt);}
         }
@@ -308,36 +335,56 @@ public final class CaveScreen extends ScreenAdapter {
         guardianCooldown-=dt;if(guardianCooldown>0)return;
         float gx=cx(map.startCol),gy=cy(map.startRow),range=Math.min(cellW,cellH)*2.8f*state.guardianRangeMultiplier();
         Mob best=null;float bd=Float.MAX_VALUE;
-        for(Mob m:mobs){if(m.dead)continue;float q=dist2(gx,gy,m.x,m.y);if(q<range*range&&q<bd){bd=q;best=m;}}
-        if(best!=null){guardianCooldown=state.guardianAttackInterval();best.hp-=state.guardianDamage();best.attack=.16f;spawnSparks(best.x,best.y,0xFFFFD873,7);}
+        // The paid guard earns his wage by looking for thieves first.
+        for(int pass=0;pass<2&&best==null;pass++)for(Mob m:mobs){
+            if(m.dead)continue;boolean thief=m.type==EnemyType.IMP||m.type==EnemyType.IMP_KING;if((pass==0)!=thief)continue;
+            float q=dist2(gx,gy,m.x,m.y);if(q<range*range&&q<bd){bd=q;best=m;}
+        }
+        if(best!=null){guardianCooldown=state.guardianAttackInterval();guardianAttackAnim=.34f;best.hp-=state.guardianDamage();best.attack=.16f;spawnSparks(best.x,best.y,0xFFFFD873,Math.min(7,workers.size()>80?3:7));}
     }
 
     private void updateWorkers(float dt){
         int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
+        CaveHazard cleanup=firstActiveCollapse();
+        int cleanupLeft=cleanup==null?0:Math.max(1,Math.min(8,(workers.size()+17)/18));
         for(int i=workers.size()-1;i>=0;i--){
             Worker w=workers.get(i);
-            w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;if(w.routeRetry>0)w.routeRetry-=dt;
+            w.spawn=Math.max(0,w.spawn-dt);w.attackCooldown-=dt;if(w.swing>0)w.swing=Math.max(0,w.swing-dt);if(w.stun>0)w.stun-=dt;if(w.routeRetry>0)w.routeRetry-=dt;
+            if(w.spawn>0){w.action=WorkerAction.IDLE;w.vx=w.vy=0;continue;}
             if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
 
-            if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){
-                w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;
-            }
-            if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){
-                w.vein=null;w.mob=priorityMob;fight(w,priorityMob,dt);continue;
-            }
-            if(priorityKind==PriorityKind.POINT&&priorityCell>=0){
-                w.vein=null;w.mob=null;moveToPriorityPoint(w,dt);continue;
-            }
+            if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;}
+            if(priorityKind==PriorityKind.MOB&&priorityMob!=null&&!priorityMob.dead){w.vein=null;w.mob=priorityMob;fight(w,priorityMob,dt);continue;}
+            if(priorityKind==PriorityKind.HAZARD&&priorityHazard!=null&&!priorityHazard.cleared&&priorityHazard.obstacleActive){w.vein=null;w.mob=null;clearCollapse(w,priorityHazard,dt);continue;}
+            if(priorityKind==PriorityKind.POINT&&priorityCell>=0){w.vein=null;w.mob=null;moveToPriorityPoint(w,dt);continue;}
 
-            Mob enemy=null;
-            if(defendersLeft>0)enemy=nearestMob(w.x,w.y);
+            Mob enemy=null;if(defendersLeft>0)enemy=nearestMob(w.x,w.y);
             if(enemy!=null){defendersLeft--;w.mob=enemy;w.vein=null;fight(w,enemy,dt);continue;}
 
             w.mob=null;
             float cap=w.tier.cargoCapacity*state.carryMultiplier(w.tier.ordinal());
             if(w.hasCargo()&&w.cargo()>=cap*.92){carryHome(w,dt);continue;}
+            if(cleanupLeft>0&&cleanup!=null&&!cleanup.cleared){cleanupLeft--;w.vein=null;clearCollapse(w,cleanup,dt);continue;}
             if(w.vein==null||w.vein.dead||map.isBlocked(w.vein.cell))w.vein=chooseVein(w);
             if(w.vein!=null)mine(w,w.vein,dt); else if(w.hasCargo())carryHome(w,dt); else {w.action=WorkerAction.IDLE;w.vx=w.vy=0;}
+        }
+    }
+
+    private CaveHazard firstActiveCollapse(){for(CaveHazard h:hazards)if(h.type==HazardType.COLLAPSE&&h.obstacleActive&&!h.cleared)return h;return null;}
+
+    private void clearCollapse(Worker w,CaveHazard h,float dt){
+        if(!atCell(w,h.cell)){
+            w.action=WorkerAction.WALK;
+            if(w.goalCell!=h.cell||w.path.length==0){w.goalCell=h.cell;w.path=map.pathToBlockedGoal(cellFor(w.x,w.y),h.cell);w.pathIndex=Math.min(1,w.path.length);}
+            followWorker(w,moveSpeed(w)*.82f,dt);return;
+        }
+        w.action=WorkerAction.MINE;w.vx=w.vy=0;
+        if(w.attackCooldown<=0&&w.swing<=0){w.swing=.58f;w.hitApplied=false;w.attackCooldown=.62f;}
+        float p=w.swing<=0?1f:1f-w.swing/.58f;
+        if(w.swing>0&&!w.hitApplied&&p>=.57f){
+            w.hitApplied=true;float damage=Math.max(1f,w.tier.miningPower*state.tierPowerMultiplier(w.tier.ordinal())*state.miningMultiplier(w.tier.ordinal())*.55f);
+            h.rubbleHp-=damage;spawnSparks(h.x,h.y,0xFF9B8A78,workers.size()>80?1:3);
+            if(h.rubbleHp<=0){h.rubbleHp=0;h.cleared=true;h.obstacleActive=false;map.unblockCell(h.cell);invalidateRoutes();if(priorityHazard==h)clearPriority(false);toast="ОБВАЛ РАЗОБРАН";toastTime=1.5f;game.audio.play(GameAudio.Sfx.ROCK_BREAK,.75f);}
         }
     }
 
@@ -434,11 +481,11 @@ public final class CaveScreen extends ScreenAdapter {
     private void updateMobs(float dt){
         List<Mob> summons=new ArrayList<>();
         for(Mob m:mobs){
-            if(m.dead)continue;m.attack=Math.max(0,m.attack-dt);m.attackCooldown-=dt;m.summonCooldown-=dt;m.routeTimer-=dt;
+            if(m.dead)continue;m.spawn=Math.max(0,m.spawn-dt);m.attack=Math.max(0,m.attack-dt);m.attackCooldown-=dt;m.summonCooldown-=dt;m.routeTimer-=dt;if(m.spawn>0)continue;
             if(m.hp<=0){killMob(m);continue;}
             boolean thief=m.type==EnemyType.IMP||m.type==EnemyType.IMP_KING;
             int goal;if(thief){goal=map.index(map.startCol,map.startRow);m.target=null;}else{m.target=nearestWorker(m.x,m.y);goal=m.target==null?map.index(map.startCol,map.startRow):cellFor(m.target.x,m.target.y);}
-            if(m.routeTimer<=0||m.goalCell!=goal){m.goalCell=goal;m.path=map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=.55f;}
+            if(m.routeTimer<=0||m.goalCell!=goal){m.goalCell=goal;m.path=thief?map.pathIgnoringBlocks(cellFor(m.x,m.y),goal):map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);m.routeTimer=.55f;}
             boolean reached=followMob(m,m.type.moveSpeed*ui,dt);
             if(reached){
                 if(thief)robChest(m);else attackWorker(m,m.target);
@@ -507,29 +554,60 @@ public final class CaveScreen extends ScreenAdapter {
         for(Iterator<CaveHazard>it=hazards.iterator();it.hasNext();){
             CaveHazard h=it.next();h.age+=dt;
             if(!h.fired&&h.age>=1.25f){h.fired=true;fireHazard(h);}
-            if(h.age>hazardDuration(h.type)){
-                if(h.obstacleActive){map.unblockCell(h.cell);h.obstacleActive=false;invalidateRoutes();}
-                it.remove();
-            }
+            if(h.fired&&h.type==HazardType.LAVA)applyLava(h,dt);
+            if(h.type==HazardType.COLLAPSE){if(h.cleared)it.remove();continue;}
+            if(h.age>hazardDuration(h.type))it.remove();
         }
     }
-    private float hazardDuration(HazardType t){return switch(t){case COLLAPSE->16f;case PIT->8f;case LAVA->9f;case FLOOD->4.8f;};}
-    private void spawnHazard(){int cell=random.nextInt(map.cols*map.rows);if(cell==map.index(map.startCol,map.startRow))cell=map.index(0,0);HazardType type=HazardType.values()[random.nextInt(HazardType.values().length)];float r=Math.min(cellW,cellH)*(type==HazardType.FLOOD?1.2f:.62f);hazards.add(new CaveHazard(type,cell,cx(map.col(cell)),cy(map.row(cell)),r));toast="ОПАСНОСТЬ • "+type.title;toastTime=1.3f;}
+    private float hazardDuration(HazardType t){return switch(t){case COLLAPSE->Float.MAX_VALUE;case PIT->8f;case LAVA->9f;case FLOOD->4.8f;};}
+    private void spawnHazard(){
+        int start=map.index(map.startCol,map.startRow),cell=start;
+        for(int tries=0;tries<12&&cell==start;tries++)cell=random.nextInt(map.cols*map.rows);
+        if(cell==start)return;
+        HazardType type=HazardType.values()[random.nextInt(HazardType.values().length)];float r=Math.min(cellW,cellH)*(type==HazardType.FLOOD?1.2f:.62f);
+        CaveHazard h=new CaveHazard(type,cell,cx(map.col(cell)),cy(map.row(cell)),r);
+        if(type==HazardType.COLLAPSE){h.rubbleMaxHp=110f*(1f+state.depth*.10f);h.rubbleHp=h.rubbleMaxHp;}
+        hazards.add(h);toast="ОПАСНОСТЬ • "+type.title;toastTime=1.3f;
+    }
     private void fireHazard(CaveHazard h){
         screenShake=Math.max(screenShake,h.type==HazardType.COLLAPSE?5f*ui:2f*ui);
         if(h.type==HazardType.COLLAPSE&&map.blockCell(h.cell)){h.obstacleActive=true;invalidateRoutes();game.audio.play(GameAudio.Sfx.COLLAPSE,.92f);game.audio.vibrate(120);}
         else {game.audio.play(GameAudio.Sfx.HAZARD,.62f);game.audio.vibrate(45);}
-        for(Worker w:new ArrayList<>(workers)){
-            float d=distance(w.x,w.y,h.x,h.y);if(d>h.r)continue;
-            float survive=state.hazardSurvivalBonus(w.tier.ordinal());
+        for(int i=workers.size()-1;i>=0;i--){
+            Worker w=workers.get(i);if(distance(w.x,w.y,h.x,h.y)>h.r)continue;float survive=state.hazardSurvivalBonus(w.tier.ordinal());
             switch(h.type){
                 case FLOOD -> w.stun=Math.max(w.stun,1.8f);
-                case LAVA -> {w.stun=Math.max(w.stun,.8f);if(random.nextFloat()<.20f*(1-survive))loseWorker(w,"сгорел в лаве");}
-                case PIT -> {if(random.nextFloat()<.24f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1.2f);}
+                case LAVA -> loseWorker(w,"сгорел в лаве");
+                case PIT -> {if(random.nextFloat()<.34f*(1-survive))loseWorker(w,"провалился в яму");else w.stun=Math.max(w.stun,1.2f);}
                 case COLLAPSE -> {if(random.nextFloat()<.28f*(1-survive))loseWorker(w,"погиб под обвалом");else w.stun=Math.max(w.stun,1.1f);}
             }
         }
-        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF6A24:0xFF918172,10);
+        hitMobsWithHazard(h);
+        spawnSparks(h.x,h.y,h.type==HazardType.FLOOD?0xFF70C9F4:h.type==HazardType.LAVA?0xFFFF8A28:0xFF918172,10);
+    }
+
+    private void applyLava(CaveHazard h,float dt){
+        float rr=h.r*.72f;
+        for(int i=workers.size()-1;i>=0;i--){Worker w=workers.get(i);if(distance(w.x,w.y,h.x,h.y)<rr)loseWorker(w,"наступил в лаву");}
+        for(Mob m:mobs){
+            if(m.dead||distance(m.x,m.y,h.x,h.y)>=rr)continue;
+            if(m.type==EnemyType.FIRE_GOLEM)continue;
+            if(m.type==EnemyType.IMP||m.type==EnemyType.DEMON)m.hp=0;
+            else m.hp-=m.maxHp*.18f*dt;
+        }
+    }
+
+    private void hitMobsWithHazard(CaveHazard h){
+        for(Mob m:mobs){
+            if(m.dead||distance(m.x,m.y,h.x,h.y)>h.r)continue;
+            boolean small=m.type==EnemyType.IMP||m.type==EnemyType.DEMON;
+            switch(h.type){
+                case LAVA -> {if(m.type!=EnemyType.FIRE_GOLEM){if(small)m.hp=0;else m.hp-=m.maxHp*.18f;}}
+                case PIT -> {if(small&&random.nextFloat()<.48f)m.hp=0;else m.hp-=m.maxHp*.08f;}
+                case COLLAPSE -> {if(small&&random.nextFloat()<.34f)m.hp=0;else m.hp-=m.maxHp*.12f;}
+                case FLOOD -> {if(m.type==EnemyType.FIRE_GOLEM)m.hp-=m.maxHp*.22f;else if(small)m.hp-=m.maxHp*.08f;}
+            }
+        }
     }
 
     private void invalidateRoutes(){
@@ -788,7 +866,7 @@ public final class CaveScreen extends ScreenAdapter {
         if(primary.hit(x,y)){switch(tab){case GNOMES->{if(selectedTier==0&&state.buyMiner()){syncWorkers(false);toast="НОВЫЙ ГНОМ";toastTime=1.2f;}else if(selectedTier>0)toast="ГНОМЫ ЭТОГО ТИПА ПОЛУЧАЮТСЯ СЛИЯНИЕМ";}case UPGRADES->buyGlobal(0);case ARTIFACTS->{if(state.upgradeArtifact(selectedArtifact)){toast="АРТЕФАКТ УСИЛЕН";}else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}case RUNES->{if(state.upgradeRune(selectedRune))toast="РУНА УСИЛЕНА";else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}}saveNow();return true;}
         if(secondary.hit(x,y)){switch(tab){case GNOMES->{if(state.upgradeTier(selectedTier))toast="ГНОМ УСИЛЕН";else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}case UPGRADES->buyGlobal(1);case RUNES->{runeTarget=(runeTarget+1)%state.runeTargetCount();}default->{}}saveNow();return true;}
         if(tertiary.hit(x,y)){switch(tab){case GNOMES->{if(state.mergeTier(selectedTier)){syncWorkers(false);toast=state.depth==1&&levelObjectiveMet()?"ЦЕЛЬ ВЫПОЛНЕНА • ПРОДВИНУТЫЙ ГНОМ":"ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.6f;}}case UPGRADES->buyGlobal(2);default->{}}saveNow();return true;}
-        if(quaternary.hit(x,y)){switch(tab){case UPGRADES->{if(state.buyOrUpgradeGuardian())toast="СТРАЖ СУНДУКА • ур."+state.guardianLevel;else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.3f;}case RUNES->{if(state.engraveRune(runeTarget,selectedRune))toast=state.runeAtTarget(runeTarget)==selectedRune?"РУНА НАНЕСЕНА":"РУНА СНЯТА";else toast="РУНА ЕЩЁ НЕ СОЗДАНА";toastTime=1.3f;}default->{}}saveNow();return true;}
+        if(quaternary.hit(x,y)){switch(tab){case UPGRADES->{int before=state.guardianLevel;if(state.buyOrUpgradeGuardian()){toast="СТРАЖ СУНДУКА • ур."+state.guardianLevel;if(before==0)guardianSpawnAnim=.70f;}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.3f;}case RUNES->{if(state.engraveRune(runeTarget,selectedRune))toast=state.runeAtTarget(runeTarget)==selectedRune?"РУНА НАНЕСЕНА":"РУНА СНЯТА";else toast="РУНА ЕЩЁ НЕ СОЗДАНА";toastTime=1.3f;}default->{}}saveNow();return true;}
         return true;
     }
 
@@ -796,30 +874,71 @@ public final class CaveScreen extends ScreenAdapter {
         Mob mob=null;float mobD=Float.MAX_VALUE;
         for(Mob m:mobs){if(m.dead)continue;float q=dist2(x,y,m.x,m.y);float rr=Math.max(18f*ui,m.type.size*ui*.75f);if(q<=rr*rr&&q<mobD){mobD=q;mob=m;}}
         if(mob!=null){
-            priorityKind=PriorityKind.MOB;priorityMob=mob;priorityVein=null;priorityCell=cellFor(mob.x,mob.y);priorityX=mob.x;priorityY=mob.y;resetWorkerRoutes();
+            longPressEligible=false;priorityKind=PriorityKind.MOB;priorityMob=mob;priorityVein=null;priorityHazard=null;priorityCell=cellFor(mob.x,mob.y);priorityX=mob.x;priorityY=mob.y;resetWorkerRoutes();
             toast="ПРИКАЗ • АТАКОВАТЬ "+mob.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
+        }
+
+        for(CaveHazard h:hazards)if(h.type==HazardType.COLLAPSE&&h.obstacleActive&&!h.cleared&&distance(x,y,h.x,h.y)<=h.r*1.15f){
+            longPressEligible=false;priorityKind=PriorityKind.HAZARD;priorityHazard=h;priorityMob=null;priorityVein=null;priorityCell=h.cell;priorityX=h.x;priorityY=h.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • РАЗОБРАТЬ ОБВАЛ";toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
         }
 
         Vein best=null;float bd=Float.MAX_VALUE;
         for(Vein v:veins){if(v.dead)continue;float q=dist2(x,y,v.x,v.y);if(q<bd){bd=q;best=v;}}
         float pickRadius=Math.min(cellW,cellH)*.80f;
         if(best!=null&&bd<=pickRadius*pickRadius){
-            priorityKind=PriorityKind.VEIN;priorityVein=best;priorityMob=null;priorityCell=best.cell;priorityX=best.x;priorityY=best.y;resetWorkerRoutes();
+            longPressEligible=false;priorityKind=PriorityKind.VEIN;priorityVein=best;priorityMob=null;priorityHazard=null;priorityCell=best.cell;priorityX=best.x;priorityY=best.y;resetWorkerRoutes();
             toast="ПРИКАЗ • ДОБЫВАТЬ "+best.type.title.toUpperCase();toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
         }
 
-        priorityKind=PriorityKind.POINT;priorityVein=null;priorityMob=null;priorityCell=cellFor(x,y);priorityX=x;priorityY=y;resetWorkerRoutes();
+        priorityKind=PriorityKind.POINT;priorityVein=null;priorityMob=null;priorityHazard=null;priorityCell=cellFor(x,y);priorityX=x;priorityY=y;resetWorkerRoutes();
         toast="ПРИКАЗ • СОБРАТЬСЯ ЗДЕСЬ";toastTime=1.25f;game.audio.play(GameAudio.Sfx.UI,.60f);game.audio.vibrate(14);
         return true;
     }
 
     private void resetWorkerRoutes(){for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;w.routeRetry=0;}}
-    private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
+    private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityHazard=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
     private boolean levelObjectiveMet(){return state.depth!=1||state.tierCounts[GnomeTier.VETERAN.ordinal()]>=1;}
     private String levelObjectiveShort(){return state.depth==1?"ЦЕЛЬ: ПРОДВИНУТЫЙ "+Math.min(1,state.tierCounts[GnomeTier.VETERAN.ordinal()])+"/1":"ЦЕЛЬ: ОЧИСТИТЬ ЖИЛЫ";}
     private String levelObjectiveToast(){return state.depth==1?"ЦЕЛЬ: СОЗДАЙТЕ 1 ПРОДВИНУТОГО ГНОМА":"ЦЕЛЬ УРОВНЯ НЕ ВЫПОЛНЕНА";}
 
     private void buyGlobal(int kind){if(state.buyGlobalUpgrade(kind)){toast="УЛУЧШЕНИЕ КУПЛЕНО";}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}
+
+    private long cargoValue(){
+        double value=0;for(Worker w:workers)value+=w.cargoStone+w.cargoSilver*8d+w.cargoGold*20d+w.cargoDiamond*100d;
+        return Math.max(0L,Math.round(value));
+    }
+
+    private void beginLevelSummary(){
+        if(levelSummary)return;speedHeld=false;levelSummary=true;summaryAnim=0;
+        summaryEarned=state.levelEarnedValue;summaryInvested=state.levelInvestedValue;summaryWallet=state.walletValue();summaryCapital=state.transferCapital(cargoValue());summaryTransfer=state.transferAmount(cargoValue());
+        saveNow();game.audio.play(GameAudio.Sfx.COIN,.8f);game.audio.vibrate(55);
+    }
+
+    private void finishLevelTransition(){
+        state.beginNextDepth(summaryTransfer);saveNow();levelSummary=false;summaryAnim=0;generateDepth(false);
+    }
+
+    private void beginGameOver(){if(gameOver)return;gameOver=true;speedHeld=false;clearPriority(false);saveNow();game.audio.vibrate(120);}
+
+    private long rolling(long target){float p=Math.min(1f,summaryAnim/1.65f);p=1f-(1f-p)*(1f-p)*(1f-p);return Math.round(target*p);}
+
+    private void drawLevelSummary(Draw d){
+        d.setColor(0xDD050607);d.fillRect(0,0,width,height);float cw=Math.min(width-38f*ui,350f*ui),l=(width-cw)/2f,t=height*.20f,b=height*.66f;
+        d.setColor(0xFF171B1E);d.fillRoundRect(l,t,l+cw,b,14f*ui);d.setColor(UiTheme.GOLD);d.fillRoundRect(l+16f*ui,t+4f*ui,l+cw-16f*ui,t+7f*ui,2f*ui);
+        d.align=Draw.Align.CENTER;d.bold=true;d.textSize=15f*ui;d.setColor(0xFFF3F0E8);d.text("УРОВЕНЬ "+state.depth+" ЗАВЕРШЁН",width/2,t+34f*ui);
+        d.bold=false;d.textSize=8f*ui;d.setColor(0xFF9FAAB0);d.text("СЛОЖНОСТЬ: "+state.difficultyTitle(),width/2,t+55f*ui);
+        float x1=l+22f*ui,x2=l+cw-22f*ui,y=t+88f*ui,dy=35f*ui;d.align=Draw.Align.LEFT;d.textSize=8.2f*ui;
+        d.setColor(0xFFB7C0C6);d.text("ЗАРАБОТАНО",x1,y);d.text("ВЛОЖЕНО В ГНОМОВ/АПГРЕЙДЫ",x1,y+dy);d.text("В СУНДУКЕ",x1,y+dy*2);d.text("КАПИТАЛ УРОВНЯ",x1,y+dy*3);d.text("ПЕРЕНОС",x1,y+dy*4);
+        d.align=Draw.Align.CENTER;d.bold=true;d.setColor(0xFFF0C85A);d.text(format(rolling(summaryEarned)),x2,y);d.text(format(rolling(summaryInvested)),x2,y+dy);d.text(format(rolling(summaryWallet)),x2,y+dy*2);d.text(format(rolling(summaryCapital)),x2,y+dy*3);d.setColor(0xFF78D092);d.text(format(rolling(summaryTransfer))+"  (×"+one.format(state.carryRatio())+")",x2,y+dy*4);
+        d.bold=false;d.align=Draw.Align.CENTER;d.textSize=7.5f*ui;d.setColor(0xFF89949B);d.text("Следующий уровень начнётся с 1 обычным гномом.",width/2,b-18f*ui);d.align=Draw.Align.LEFT;
+        button(d,summaryOk,"УРОВЕНЬ "+(state.depth+1)+"  •  OK",summaryAnim>.75f,.82f);
+    }
+
+    private void drawGameOver(Draw d){
+        d.setColor(0xE60A0606);d.fillRect(0,0,width,height);float cw=Math.min(width-46f*ui,340f*ui),l=(width-cw)/2f,t=height*.28f,b=height*.61f;
+        d.setColor(0xFF1B1515);d.fillRoundRect(l,t,l+cw,b,14f*ui);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=18f*ui;d.setColor(0xFFE66658);d.text("ЭКСПЕДИЦИЯ ПОГИБЛА",width/2,t+54f*ui);d.textSize=10f*ui;d.setColor(0xFFF1E8E3);d.text("ГНОМОВ НЕ ОСТАЛОСЬ",width/2,t+94f*ui);d.bold=false;d.textSize=8.3f*ui;d.setColor(0xFFAAA29F);d.text("И денег на нового гнома тоже нет.",width/2,t+125f*ui);d.align=Draw.Align.LEFT;button(d,gameOverOk,"В МЕНЮ",true,.86f);
+    }
 
     private void routeMob(Mob m,int goal){m.goalCell=goal;m.path=map.path(cellFor(m.x,m.y),goal);m.pathIndex=Math.min(1,m.path.length);}
     private boolean atCell(Worker w,int cell){if(cell<0)return false;return distance(w.x,w.y,cx(map.col(cell)),cy(map.row(cell)))<Math.min(cellW,cellH)*.20f;}

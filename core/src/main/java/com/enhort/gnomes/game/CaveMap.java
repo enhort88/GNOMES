@@ -5,12 +5,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Small deterministic perfect-maze graph used by the mine. The mine is a graph first and a picture second:
  * workers and enemies really route through the carved tunnels instead of skating through solid stone.
  */
 public final class CaveMap {
+    public enum Style { BRANCHING, RING }
+
     public static final int N = 1;
     public static final int E = 2;
     public static final int S = 4;
@@ -22,14 +26,21 @@ public final class CaveMap {
     public final int startCol;
     public final int startRow;
     public final long seed;
+    public final Style style;
 
+    private static final int[] DIRS = {N, E, S, W};
     private final Random random;
     private final boolean[] blocked;
+    private int revision;
+    private final LinkedHashMap<Long, int[]> pathCache = new LinkedHashMap<>(256, .75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<Long, int[]> eldest) { return size() > 384; }
+    };
 
     public CaveMap(int cols, int rows, long seed) {
         this.cols = Math.max(5, cols | 1);
         this.rows = Math.max(7, rows);
         this.seed = seed;
+        this.style = ((seed >>> 5) & 3L) == 0L ? Style.RING : Style.BRANCHING;
         this.random = new Random(seed);
         this.openings = new int[this.rows][this.cols];
         this.blocked = new boolean[this.rows * this.cols];
@@ -65,15 +76,56 @@ public final class CaveMap {
             if (!moved) stack.pop();
         }
 
-        // A few loops make the mine feel hand-carved instead of a textbook maze, while keeping navigation readable.
-        int extra = Math.max(2, cols * rows / 18);
+        // More loops are intentional: the chest must not sit behind one compulsory corridor.
+        int extra = Math.max(5, cols * rows / (style == Style.RING ? 6 : 10));
         for (int i = 0; i < extra; i++) {
             int c = random.nextInt(cols);
             int r = random.nextInt(rows);
-            int dir = dirs[random.nextInt(dirs.length)];
+            int dir = DIRS[random.nextInt(DIRS.length)];
             int nc = c + dx(dir), nr = r + dy(dir);
             if (!inside(nc, nr)) continue;
             if ((openings[r][c] & dir) == 0) connect(c, r, nc, nr, dir);
+        }
+        ensureStartJunction();
+        if (style == Style.RING) carveRing();
+    }
+
+    private void ensureStartJunction() {
+        if (startRow > 0) connect(startCol, startRow, startCol, startRow - 1, N);
+        int side = (seed & 1L) == 0L ? E : W;
+        int nc = startCol + dx(side);
+        if (inside(nc, startRow)) connect(startCol, startRow, nc, startRow, side);
+        if ((seed & 4L) != 0L) {
+            int other = opposite(side);
+            nc = startCol + dx(other);
+            if (inside(nc, startRow)) connect(startCol, startRow, nc, startRow, other);
+        }
+    }
+
+    private void carveRing() {
+        int left = 1, right = cols - 2, top = 1, bottom = Math.max(top + 2, rows - 3);
+        for (int c = left; c < right; c++) {
+            connect(c, top, c + 1, top, E);
+            connect(c, bottom, c + 1, bottom, E);
+        }
+        for (int r = top; r < bottom; r++) {
+            connect(left, r, left, r + 1, S);
+            connect(right, r, right, r + 1, S);
+        }
+        // Two spokes make the ring useful rather than decorative.
+        int mid = Math.max(left + 1, Math.min(right - 1, startCol));
+        for (int r = startRow; r > bottom; r--) connect(mid, r, mid, r - 1, N);
+        if (mid > left) connect(mid, bottom, mid - 1, bottom, W);
+        if (mid < right) connect(mid, bottom, mid + 1, bottom, E);
+
+        if (cols >= 9 && rows >= 11) {
+            int il = 3, ir = cols - 4, it = 3, ib = Math.max(it + 2, rows - 5);
+            if (il < ir && it < ib) {
+                for (int c = il; c < ir; c++) { connect(c, it, c + 1, it, E); connect(c, ib, c + 1, ib, E); }
+                for (int r = it; r < ib; r++) { connect(il, r, il, r + 1, S); connect(ir, r, ir, r + 1, S); }
+                connect(il, (it + ib) / 2, il - 1, (it + ib) / 2, W);
+                connect(ir, (it + ib) / 2, ir + 1, (it + ib) / 2, E);
+            }
         }
     }
 
@@ -91,13 +143,19 @@ public final class CaveMap {
     }
 
     public boolean blockCell(int cell) {
-        if (cell < 0 || cell >= blocked.length || cell == index(startCol, startRow)) return false;
+        if (cell < 0 || cell >= blocked.length || cell == index(startCol, startRow) || blocked[cell]) return false;
         blocked[cell] = true;
+        revision++;
+        pathCache.clear();
         return true;
     }
 
     public void unblockCell(int cell) {
-        if (cell >= 0 && cell < blocked.length) blocked[cell] = false;
+        if (cell >= 0 && cell < blocked.length && blocked[cell]) {
+            blocked[cell] = false;
+            revision++;
+            pathCache.clear();
+        }
     }
 
     public boolean isBlocked(int cell) {
@@ -133,12 +191,25 @@ public final class CaveMap {
         return out;
     }
 
-    /** Returns a list containing start and goal. Empty only for invalid cells. */
-    public int[] path(int start, int goal) {
+    /** Normal worker path: rubble is solid. */
+    public int[] path(int start, int goal) { return pathInternal(start, goal, false, false); }
+
+    /** Imps use this: a cave-in never blocks their route to the chest. */
+    public int[] pathIgnoringBlocks(int start, int goal) { return pathInternal(start, goal, true, false); }
+
+    /** Workers clearing a cave-in may enter the blocked goal cell, but cannot cross other rubble. */
+    public int[] pathToBlockedGoal(int start, int goal) { return pathInternal(start, goal, false, true); }
+
+    private int[] pathInternal(int start, int goal, boolean ignoreBlocks, boolean allowBlockedGoal) {
         int count = cols * rows;
         if (start < 0 || start >= count || goal < 0 || goal >= count) return new int[0];
-        if (isBlocked(goal) && goal != start) return new int[0];
+        if (!ignoreBlocks && isBlocked(goal) && !allowBlockedGoal && goal != start) return new int[0];
         if (start == goal) return new int[] { start };
+
+        long key = (((long) revision) << 32) ^ (((long) start) << 16) ^ goal
+                ^ (ignoreBlocks ? (1L << 62) : 0L) ^ (allowBlockedGoal ? (1L << 61) : 0L);
+        int[] cached = pathCache.get(key);
+        if (cached != null) return cached;
 
         int[] parent = new int[count];
         java.util.Arrays.fill(parent, -2);
@@ -149,19 +220,25 @@ public final class CaveMap {
             int cur = q.removeFirst();
             int c = col(cur), r = row(cur);
             int bits = openings[r][c];
-            for (int dir : new int[]{N,E,S,W}) {
+            for (int dir : DIRS) {
                 if ((bits & dir) == 0) continue;
                 int nc = c + dx(dir), nr = r + dy(dir);
                 if (!inside(nc, nr)) continue;
                 int next = index(nc, nr);
-                if (next != start && isBlocked(next)) continue;
+                if (!ignoreBlocks && next != start && isBlocked(next) && !(allowBlockedGoal && next == goal)) continue;
                 if (parent[next] != -2) continue;
                 parent[next] = cur;
-                if (next == goal) return reconstruct(parent, goal);
+                if (next == goal) {
+                    int[] result = reconstruct(parent, goal);
+                    pathCache.put(key, result);
+                    return result;
+                }
                 q.addLast(next);
             }
         }
-        return new int[0];
+        int[] empty = new int[0];
+        pathCache.put(key, empty);
+        return empty;
     }
 
     private static int[] reconstruct(int[] parent, int goal) {

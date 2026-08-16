@@ -13,7 +13,7 @@ import com.enhort.gnomes.ui.UiTheme;
 import java.util.Random;
 
 public final class MenuScreen extends ScreenAdapter {
-    private enum Mode { MAIN, SLOTS, SETTINGS, ABOUT, DELETE }
+    private enum Mode { MAIN, SLOTS, DIFFICULTY, SETTINGS, ABOUT, DELETE }
 
     private static final class Box {
         float l,t,r,b;
@@ -36,6 +36,7 @@ public final class MenuScreen extends ScreenAdapter {
     private final Box[] main=new Box[6];
     private final Box[] slots=new Box[SaveRepository.SLOT_COUNT];
     private final Box[] slotDelete=new Box[SaveRepository.SLOT_COUNT];
+    private final Box[] difficultyButtons={new Box(),new Box(),new Box(),new Box()};
     private final Box back=new Box();
     private final Box yes=new Box(),no=new Box();
     private final Box infoCard=new Box();
@@ -44,6 +45,7 @@ public final class MenuScreen extends ScreenAdapter {
     private Mode mode=Mode.MAIN;
     private float width,height,ui,elapsed;
     private int pendingDelete=-1;
+    private int pendingNewSlot=-1;
     private int gTapCount;
     private float cheatNotice;
 
@@ -106,6 +108,12 @@ public final class MenuScreen extends ScreenAdapter {
             slotDelete[i].set(slots[i].r-dw-7f*ui,top+7f*ui,slots[i].r-7f*ui,top+sh-7f*ui);
         }
 
+        float diffW=Math.min(width-side*2,330f*ui),diffX=(width-diffW)/2f;
+        float diffTop=Math.min(height*.25f,160f*ui),diffBottom=back.t-12f*ui,diffGap=9f*ui;
+        float diffH=Math.max(42f*ui,Math.min(58f*ui,(diffBottom-diffTop-diffGap*3)/4f));
+        float diffTotal=diffH*4+diffGap*3,diffY=diffTop+Math.max(0,(diffBottom-diffTop-diffTotal)*.5f);
+        for(int i=0;i<4;i++)difficultyButtons[i].set(diffX,diffY+i*(diffH+diffGap),diffX+diffW,diffY+i*(diffH+diffGap)+diffH);
+
         float confirmW=Math.min(width-42f*ui,330f*ui),confirmX=(width-confirmW)/2f;
         float confirmY=Math.min(height*.58f,height-130f*ui);
         float confirmGap=10f*ui,confirmButton=(confirmW-confirmGap)/2f;
@@ -132,7 +140,7 @@ public final class MenuScreen extends ScreenAdapter {
         Draw d=game.draw;
         d.beginFrame();
         background(d);
-        switch(mode){case MAIN->main(d);case SLOTS->slots(d);case SETTINGS->settings(d);case ABOUT->about(d);case DELETE->delete(d);}
+        switch(mode){case MAIN->main(d);case SLOTS->slots(d);case DIFFICULTY->difficulty(d);case SETTINGS->settings(d);case ABOUT->about(d);case DELETE->delete(d);}
         d.endFrame();
     }
 
@@ -236,10 +244,22 @@ public final class MenuScreen extends ScreenAdapter {
             if(s==null){
                 d.setColor(0xFF7D8991);d.text("пусто • начать новую шахту",b.l+14f*ui,b.t+b.h()*.72f);
             }else{
-                d.setColor(0xFFB8C1C7);d.text("глуб. "+Math.max(1,s.depth)+"  •  кам "+fmt(s.stone)+"  •  ◆ "+fmt(s.diamond),b.l+14f*ui,b.t+b.h()*.72f);
+                d.setColor(0xFFB8C1C7);d.text("глуб. "+Math.max(1,s.depth)+"  •  "+difficultyShort(s.difficulty)+"  •  кам "+fmt(s.stone)+"  •  ◆ "+fmt(s.diamond),b.l+14f*ui,b.t+b.h()*.72f);
                 button(d,slotDelete[i],"×",true,UiTheme.RED,false,1.05f);
             }
         }
+        button(d,back,"НАЗАД",true,UiTheme.STEEL,false,.92f);
+    }
+
+    private void difficulty(Draw d){
+        heading(d,"СЛОЖНОСТЬ ЭКСПЕДИЦИИ");
+        d.align=Draw.Align.CENTER;d.textSize=7.8f*ui;d.setColor(0xFF9EAAAF);
+        d.text("После каждого уровня гномы и обычные апгрейды продаются.",width/2,128f*ui);
+        d.align=Draw.Align.LEFT;
+        button(d,difficultyButtons[0],"ЛЁГКАЯ  •  перенос 1/2",true,UiTheme.GREEN,false,.82f);
+        button(d,difficultyButtons[1],"СРЕДНЯЯ  •  перенос 1/3",true,UiTheme.GOLD,false,.82f);
+        button(d,difficultyButtons[2],"СЛОЖНАЯ  •  перенос 1/4",true,UiTheme.COPPER,false,.82f);
+        button(d,difficultyButtons[3],"БЕЗ ПЕРЕНОСА  •  0",true,UiTheme.RED,false,.82f);
         button(d,back,"НАЗАД",true,UiTheme.STEEL,false,.92f);
     }
 
@@ -314,11 +334,16 @@ public final class MenuScreen extends ScreenAdapter {
                 if(game.saves.exists(slot)&&slotDelete[i].hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.45f);pendingDelete=slot;mode=Mode.DELETE;return;}
                 if(slots[i].hit(x,y)){
                     game.audio.play(GameAudio.Sfx.UI,.5f);
-                    if(game.saves.exists(slot))game.playSlot(slot);else game.playNewSlot(slot);
+                    if(game.saves.exists(slot))game.playSlot(slot);else{pendingNewSlot=slot;mode=Mode.DIFFICULTY;}
                     return;
                 }
             }
             if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);mode=Mode.MAIN;}
+        }else if(mode==Mode.DIFFICULTY){
+            for(int i=0;i<difficultyButtons.length;i++)if(difficultyButtons[i].hit(x,y)){
+                game.audio.play(GameAudio.Sfx.UI,.6f);int slot=pendingNewSlot;pendingNewSlot=-1;game.playNewSlot(slot,i+1);return;
+            }
+            if(back.hit(x,y)){game.audio.play(GameAudio.Sfx.UI,.4f);pendingNewSlot=-1;mode=Mode.SLOTS;}
         }else if(mode==Mode.SETTINGS){
             if(soundToggle.hit(x,y)){game.settings.toggleSound();if(game.settings.soundEnabled)game.audio.play(GameAudio.Sfx.UI,.75f);return;}
             if(vibrationToggle.hit(x,y)){game.settings.toggleVibration();if(game.settings.vibrationEnabled)game.audio.vibrate(45);game.audio.play(GameAudio.Sfx.UI,.5f);return;}
@@ -338,6 +363,8 @@ public final class MenuScreen extends ScreenAdapter {
         r=Math.min(255,Math.max(0,(int)(r*f)));g=Math.min(255,Math.max(0,(int)(g*f)));b=Math.min(255,Math.max(0,(int)(b*f)));
         return(a<<24)|(r<<16)|(g<<8)|b;
     }
+
+    private static String difficultyShort(int d){return switch(d){case 1->"лёгк.";case 3->"сложн.";case 4->"без перен.";default->"средн.";};}
 
     private static String fmt(long n){
         if(n>=1_000_000_000L)return String.format(java.util.Locale.US,"%.1fB",n/1_000_000_000d);

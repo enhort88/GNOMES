@@ -23,6 +23,9 @@ public class GameState {
     public int enemiesDefeated = 0;
     public int gnomesLost = 0;
     public long stolenValue = 0;
+    public int difficulty = 2;
+    public long levelEarnedValue = 0;
+    public long levelInvestedValue = 0;
 
     public final int[] tierCounts = new int[GnomeTier.values().length];
     public final int[] tierLevels = new int[GnomeTier.values().length];
@@ -40,7 +43,7 @@ public class GameState {
     public int guardianLevel = 0;
 
     public GameState() {
-        tierCounts[0] = 3;
+        tierCounts[0] = 1;
         for (int i = 0; i < tierLevels.length; i++) tierLevels[i] = 1;
         java.util.Arrays.fill(tierRunes, -1);
         java.util.Arrays.fill(upgradeRunes, -1);
@@ -127,6 +130,49 @@ public class GameState {
         p.flush();
     }
 
+    public void setDifficulty(int difficulty) { this.difficulty = Math.max(1, Math.min(4, difficulty)); }
+
+    public double carryRatio() {
+        return switch (difficulty) { case 1 -> .5; case 2 -> 1.0 / 3.0; case 3 -> .25; default -> 0.0; };
+    }
+
+    public String difficultyTitle() {
+        return switch (difficulty) { case 1 -> "ЛЁГКАЯ"; case 2 -> "СРЕДНЯЯ"; case 3 -> "СЛОЖНАЯ"; default -> "БЕЗ ПЕРЕНОСА"; };
+    }
+
+    public long walletValue() { return stone + silver * 8L + gold * 20L + diamond * 100L; }
+
+    public static long materialValue(RockType.Material material, long amount) {
+        long weight = switch (material) { case STONE -> 1L; case SILVER -> 8L; case GOLD -> 20L; case DIAMOND -> 100L; };
+        return Math.max(0L, amount) * weight;
+    }
+
+    public long transferCapital(long cargoValue) {
+        return Math.max(0L, walletValue() + levelInvestedValue + Math.max(0L, cargoValue));
+    }
+
+    public long transferAmount(long cargoValue) {
+        return (long) Math.floor(transferCapital(cargoValue) * carryRatio());
+    }
+
+    public void beginNextDepth(long transferredValue) {
+        depth++;
+        depthProgress = 0;
+        stone = Math.max(0L, transferredValue);
+        silver = gold = diamond = 0;
+        java.util.Arrays.fill(tierCounts, 0);
+        tierCounts[0] = 1;
+        java.util.Arrays.fill(tierLevels, 1);
+        miningUpgrade = speedUpgrade = combatUpgrade = 0;
+        guardianLevel = 0;
+        levelEarnedValue = 0;
+        levelInvestedValue = 0;
+    }
+
+    public boolean canBuyMiner() {
+        return tierCounts[0] < 99 && (FREE_SHOP || stone >= minerBuyCost());
+    }
+
     public double yieldFor(RockType type, int tier) {
         return type.yield * incomeMultiplier(tier);
     }
@@ -141,6 +187,7 @@ public class GameState {
             case GOLD -> gold += whole;
             case DIAMOND -> diamond += whole;
         }
+        levelEarnedValue += materialValue(material, whole);
         return whole;
     }
 
@@ -226,10 +273,12 @@ public class GameState {
             if (guardianLevel < 3) {
                 if (stone < cost) return false;
                 stone -= cost;
+                levelInvestedValue += cost;
             } else {
                 long silverCost = Math.max(4, cost / 120);
                 if (silver < silverCost) return false;
                 silver -= silverCost;
+                levelInvestedValue += silverCost * 8L;
             }
         }
         guardianLevel++;
@@ -281,6 +330,7 @@ public class GameState {
         if (!FREE_SHOP) {
             if (stone < cost) return false;
             stone -= cost;
+            levelInvestedValue += cost;
         }
         tierCounts[0]++;
         return true;
@@ -300,12 +350,17 @@ public class GameState {
             if (tier < 2) {
                 if (stone < cost) return false;
                 stone -= cost;
+                levelInvestedValue += cost;
             } else if (tier < 4) {
-                if (silver < Math.max(1, cost / 90)) return false;
-                silver -= Math.max(1, cost / 90);
+                long paid = Math.max(1, cost / 90);
+                if (silver < paid) return false;
+                silver -= paid;
+                levelInvestedValue += paid * 8L;
             } else {
-                if (gold < Math.max(1, cost / 180)) return false;
-                gold -= Math.max(1, cost / 180);
+                long paid = Math.max(1, cost / 180);
+                if (gold < paid) return false;
+                gold -= paid;
+                levelInvestedValue += paid * 20L;
             }
         }
         tierLevels[tier]++;
@@ -329,19 +384,22 @@ public class GameState {
         if (kind == 0) {
             if (stone < cost) return false;
             stone -= cost;
+            levelInvestedValue += cost;
             miningUpgrade++;
             return true;
         }
         if (kind == 1) {
-            long silverCost = Math.max(2, cost / 100);
-            if (silver < silverCost) return false;
-            silver -= silverCost;
+            long paid = Math.max(2, cost / 100);
+            if (silver < paid) return false;
+            silver -= paid;
+            levelInvestedValue += paid * 8L;
             speedUpgrade++;
             return true;
         }
-        long goldCost = Math.max(1, cost / 180);
-        if (gold < goldCost) return false;
-        gold -= goldCost;
+        long paid = Math.max(1, cost / 180);
+        if (gold < paid) return false;
+        gold -= paid;
+        levelInvestedValue += paid * 20L;
         combatUpgrade++;
         return true;
     }
