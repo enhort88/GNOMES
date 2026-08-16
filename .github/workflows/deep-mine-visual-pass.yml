@@ -18,6 +18,18 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Normalize visual migration matchers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tools/deep_mine_visual_pass.py')
+          s=p.read_text()
+          old="r'    private void drawGuardian\\(Draw d,float x,float y,float s\\)\\{.*?\\n    \\}\\n\\n    private void drawWorker'"
+          new="r'    private void drawGuardian\\(Draw d,float x,float y,float s\\)\\{.*?(?=\\n\\n    private void drawWorker)'"
+          if old not in s:
+              raise SystemExit('guardian matcher not found')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Apply visual pass
         run: python3 tools/deep_mine_visual_pass.py
       - name: Normalize for current Draw API
