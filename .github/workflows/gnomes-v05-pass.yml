@@ -45,6 +45,37 @@ jobs:
           PY
       - name: Apply GNOMES v0.5 pass
         run: python3 tools/gnomes_v05_pass.py
+      - name: Normalize generated source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          cave=Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java')
+          s=cave.read_text()
+          old='private void drawImp(Draw d,Mob m,float s){\n        float hop='
+          new='private void drawImp(Draw d,Mob m,float s){\n        float panic=m.flee>0?1f:0f;float hop='
+          if old not in s:
+              raise SystemExit('drawImp panic anchor missing')
+          s=s.replace(old,new,1)
+          # Portal spawns must enter the live mob list before updateMobs clears its summon scratch list.
+          old='pendingMobs.add(m);portal.spawnTimer=.30f+(type.isBoss()?.22f:0);'
+          new='mobs.add(m);portal.spawnTimer=.30f+(type.isBoss()?.22f:0);'
+          if old not in s:
+              raise SystemExit('portal live-spawn anchor missing')
+          s=s.replace(old,new,1)
+          s=s.replace('✓ ПРИНАДЛЕЖИТ ВАМ','КУПЛЕН • ПРИНАДЛЕЖИТ ВАМ')
+          s=s.replace('✦ АКТИВИРОВАН','АКТИВИРОВАН')
+          cave.write_text(s)
+
+          cmap=Path('core/src/main/java/com/enhort/gnomes/game/CaveMap.java')
+          m=cmap.read_text()
+          start=m.index('public int[] pathAvoiding')
+          pos=m.index('if (start == goal) return new int[] { start };',start)
+          anchor='if (start == goal) return new int[] { start };'
+          replacement=anchor+'\n        if (avoid != null && goal < avoid.length && avoid[goal]) return new int[0];'
+          m=m[:pos]+m[pos:].replace(anchor,replacement,1)
+          cmap.write_text(m)
+          PY
       - name: Static mechanic assertions
         run: |
           python3 - <<'PY'
@@ -52,10 +83,11 @@ jobs:
           cave=Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java').read_text()
           state=Path('core/src/main/java/com/enhort/gnomes/game/GameState.java').read_text()
           enemy=Path('core/src/main/java/com/enhort/gnomes/game/model/EnemyType.java').read_text()
+          cmap=Path('core/src/main/java/com/enhort/gnomes/game/CaveMap.java').read_text()
           checks={
             'hold-buy':'updateBuyHold' in cave,
-            'portal':'openPortal' in cave and 'drawPortal' in cave,
-            'trap-avoid':'pathAvoiding' in cave,
+            'portal':'openPortal' in cave and 'drawPortal' in cave and 'mobs.add(m);portal.spawnTimer' in cave,
+            'trap-avoid':'pathAvoiding' in cave and 'avoid[goal]' in cmap,
             'collapse-exploit-guard':'map.isBlocked(node)' in cave,
             'ghost':'GHOST' in enemy and 'spawnGhostFrom' in cave,
             'succubus':'SUCCUBUS' in enemy and 'fightAlly' in cave,
@@ -63,6 +95,7 @@ jobs:
             'enemy-scale':'enemyHpScale' in state and 'enemyDamageScale' in state,
             'global-runes':'runeEffect(RuneType' in state and 'runeActive' in state,
             'artifact-one-buy':'artifactLevels[artifactIndex] > 0' in state,
+            'imp-flee':'panic=m.flee' in cave and 'm.flee=.95f' in cave,
           }
           bad=[k for k,v in checks.items() if not v]
           print(checks)
