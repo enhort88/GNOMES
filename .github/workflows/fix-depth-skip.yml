@@ -2,8 +2,10 @@ name: fix-depth-skip
 
 on:
   push:
-    branches: [ feature/gnomes-v06 ]
-    paths: [ '.github/workflows/fix-depth-skip.yml' ]
+    branches:
+      - feature/gnomes-v06
+    paths:
+      - .github/workflows/fix-depth-skip.yml
 
 permissions:
   contents: write
@@ -20,45 +22,17 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
-
-      - name: Fix post-tutorial objective selection
+      - name: Patch objective selector
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java')
-          s = p.read_text()
-          old = '        if(state.depth==1)objectiveType=ObjectiveType.ASCEND_GNOME;else if(state.depth%10==0)objectiveType=ObjectiveType.BOSS_HUNT;else objectiveType=ObjectiveType.values()[Math.floorMod(state.depth+slot*3,5)];objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;'
-          new = '''        if(state.depth==1){
-            objectiveType=ObjectiveType.ASCEND_GNOME;
-        }else if(state.depth%10==0){
-            objectiveType=ObjectiveType.BOSS_HUNT;
-        }else{
-            // ASCEND_GNOME is the depth-1 tutorial objective only. A Veteran is carried between depths,
-            // so selecting it again could make a fresh level complete instantly and appear to skip a depth.
-            ObjectiveType[] pool={ObjectiveType.CLEAR_VEINS,ObjectiveType.GUARDIAN,ObjectiveType.DEMON_PURGE,ObjectiveType.BOSS_HUNT,ObjectiveType.TREASURE};
-            objectiveType=pool[Math.floorMod(state.depth+slot*3,pool.length)];
-        }
-        objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;'''
-          if old not in s:
-              raise SystemExit('setupObjective selector not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-          PY
-
-      - name: Verify objective invariants
-        run: |
-          grep -F 'ASCEND_GNOME is the depth-1 tutorial objective only' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
-          grep -F 'ObjectiveType.TREASURE' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
-
+          python3 -c 'from pathlib import Path; p=Path("core/src/main/java/com/enhort/gnomes/game/CaveScreen.java"); s=p.read_text(); old="        if(state.depth==1)objectiveType=ObjectiveType.ASCEND_GNOME;else if(state.depth%10==0)objectiveType=ObjectiveType.BOSS_HUNT;else objectiveType=ObjectiveType.values()[Math.floorMod(state.depth+slot*3,5)];objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;"; new="        if(state.depth==1){objectiveType=ObjectiveType.ASCEND_GNOME;}else if(state.depth%10==0){objectiveType=ObjectiveType.BOSS_HUNT;}else{ObjectiveType[] pool={ObjectiveType.CLEAR_VEINS,ObjectiveType.GUARDIAN,ObjectiveType.DEMON_PURGE,ObjectiveType.BOSS_HUNT,ObjectiveType.TREASURE};objectiveType=pool[Math.floorMod(state.depth+slot*3,pool.length)];}objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;"; assert old in s, "selector not found"; p.write_text(s.replace(old,new,1))'
+      - name: Verify fix
+        run: grep -F 'ObjectiveType[] pool={ObjectiveType.CLEAR_VEINS' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
       - name: Compile core
         run: ./gradlew -PskipAndroid :core:compileJava --stacktrace
-
       - name: Build Android debug APK
         run: ./gradlew :android:assembleDebug --stacktrace
-
-      - name: Commit fix and remove temporary workflow
+      - name: Commit fix
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
