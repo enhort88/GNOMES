@@ -335,7 +335,7 @@ public class GameState {
     public long tierUpgradeCost(int tier) {
         if (FREE_SHOP) return 0;
         int lvl = tierLevels[tier];
-        return Math.round((95 + tier * 190L) * Math.pow(1.72, lvl - 1));
+        return Math.round((12 + tier * 8L) * Math.pow(1.58, lvl - 1));
     }
 
     public boolean buyMiner() {
@@ -364,9 +364,9 @@ public class GameState {
         if (tier < 0 || tier >= tierLevels.length) return false;
         long cost = tierUpgradeCost(tier);
         if (!FREE_SHOP) {
-            if (stone < cost) return false;
-            stone -= cost;
-            levelInvestedValue += cost;
+            if (silver < cost) return false;
+            silver -= cost;
+            levelInvestedValue += cost * 8L;
         }
         tierLevels[tier]++;
         return true;
