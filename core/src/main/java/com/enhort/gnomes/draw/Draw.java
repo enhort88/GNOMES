@@ -295,6 +295,17 @@ public class Draw implements Disposable {
         f.draw(batch, s, drawX, y - effectiveSize * 0.78f);
     }
 
+    /** Returns the actual rendered width at the current textSize/bold settings. */
+    public float textWidth(String s) {
+        if (s == null || s.isEmpty()) return 0f;
+        BitmapFont f = bold && fontBold != null ? fontBold : font;
+        if (f == null) return 0f;
+        float effectiveSize = textSize * 2.0f;
+        f.getData().setScale(effectiveSize / 32f);
+        layout.setText(f, s);
+        return layout.width;
+    }
+
     public void image(Texture texture, float l, float t, float r, float b) {
         if (texture == null || r <= l || b <= t) return;
         ensure(Mode.TEXT);
