@@ -178,8 +178,9 @@ public class GameState {
 
     private static float upgradeCurve(int level, float early, float late) {
         int a = Math.min(10, Math.max(0, level));
-        int b = Math.max(0, level - 10);
-        return 1f + a * early + b * late;
+        int b = Math.min(20, Math.max(0, level - 10));
+        int c = Math.max(0, level - 30);
+        return 1f + a * early + b * late + c * late * .22f;
     }
 
     /** Diminishing returns stop level-30 upgrades from turning two miners into orbital weapons. */
@@ -276,7 +277,7 @@ public class GameState {
         float d = Math.max(0, depth - 1);
         float scale = 1f + .40f * d + .015f * d * d;
         float diff = switch (difficulty) { case 1 -> .82f; case 2 -> 1f; case 3 -> 1.26f; default -> 1.58f; };
-        if (type.isBoss()) scale *= 2.35f;
+        if (type.isBoss()) scale *= 3.35f;
         if (type == EnemyType.GHOST) scale *= .78f;
         if (type == EnemyType.SUCCUBUS) scale *= 1.12f;
         return scale * diff;
@@ -286,7 +287,7 @@ public class GameState {
         float d = Math.max(0, depth - 1);
         float scale = 1f + .18f * d + .0045f * d * d;
         float diff = switch (difficulty) { case 1 -> .78f; case 2 -> 1f; case 3 -> 1.22f; default -> 1.48f; };
-        if (type.isBoss()) scale *= 1.65f;
+        if (type.isBoss()) scale *= 1.85f;
         return scale * diff;
     }
 
