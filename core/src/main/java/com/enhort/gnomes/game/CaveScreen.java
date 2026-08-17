@@ -210,7 +210,7 @@ public final class CaveScreen extends ScreenAdapter {
         left.set(9f*ui,contentT+3f*ui,42f*ui,contentT+3f*ui+navH);
         right.set(width-42f*ui,contentT+3f*ui,width-9f*ui,contentT+3f*ui+navH);
 
-        float actionsTop=contentT+navH+7f*ui;
+        float actionsTop=Math.max(contentT+58f*ui,contentT+navH+7f*ui);
         float actionsBottom=speed.t-7f*ui;
         float gap=7f*ui;
         float side=9f*ui;
@@ -450,10 +450,20 @@ public final class CaveScreen extends ScreenAdapter {
     private CaveHazard firstActiveCollapse(){for(CaveHazard h:hazards)if(h.type==HazardType.COLLAPSE&&h.obstacleActive&&!h.cleared)return h;return null;}
 
     private void clearCollapse(Worker w,CaveHazard h,float dt){
-        if(!atCell(w,h.cell)){
-            w.action=WorkerAction.WALK;
-            if(w.goalCell!=h.cell||w.path.length==0){w.goalCell=h.cell;w.path=map.pathToBlockedGoal(cellFor(w.x,w.y),h.cell);w.pathIndex=Math.min(1,w.path.length);}
-            followWorker(w,moveSpeed(w)*.82f,dt);return;
+        float base=Math.min(cellW,cellH),reach=base*.66f;
+        if(distance(w.x,w.y,h.x,h.y)>reach){
+            int approach=collapseApproachCell(w,h);
+            if(approach<0){w.action=WorkerAction.IDLE;w.vx=w.vy=0;w.routeRetry=.22f;return;}
+            if(!atCell(w,approach)){
+                w.action=WorkerAction.WALK;
+                if(w.goalCell!=approach||w.path.length==0){w.goalCell=approach;w.path=map.path(cellFor(w.x,w.y),approach);w.pathIndex=Math.min(1,w.path.length);}
+                followWorker(w,moveSpeed(w)*.82f,dt);return;
+            }
+            float dx=h.x-w.x,dy=h.y-w.y,di=len(dx,dy);
+            if(di>.001f){
+                float tx=h.x-dx/di*base*.58f,ty=h.y-dy/di*base*.58f;
+                w.action=WorkerAction.WALK;moveDirect(w,tx,ty,moveSpeed(w)*.62f,dt);return;
+            }
         }
         w.action=WorkerAction.MINE;w.vx=w.vy=0;
         if(w.attackCooldown<=0&&w.swing<=0){w.swing=.58f;w.hitApplied=false;w.attackCooldown=.62f;}
@@ -463,6 +473,18 @@ public final class CaveScreen extends ScreenAdapter {
             h.rubbleHp-=damage;spawnSparks(h.x,h.y,0xFF9B8A78,workers.size()>80?1:3);
             if(h.rubbleHp<=0){h.rubbleHp=0;h.cleared=true;h.obstacleActive=false;map.unblockCell(h.cell);invalidateRoutes();if(priorityHazard==h)clearPriority(false);toast="ОБВАЛ РАЗОБРАН";toastTime=1.5f;game.audio.play(GameAudio.Sfx.ROCK_BREAK,.75f);}
         }
+    }
+
+    private int collapseApproachCell(Worker w,CaveHazard h){
+        int hc=map.col(h.cell),hr=map.row(h.cell),start=cellFor(w.x,w.y),best=-1,bestLen=Integer.MAX_VALUE;
+        int[] dirs={CaveMap.N,CaveMap.E,CaveMap.S,CaveMap.W};
+        for(int dir:dirs){
+            if(!map.connected(hc,hr,dir))continue;
+            int nc=hc+CaveMap.dx(dir),nr=hr+CaveMap.dy(dir);if(!map.inside(nc,nr))continue;
+            int cell=map.index(nc,nr);if(map.isBlocked(cell))continue;
+            int[] route=map.path(start,cell);if(route.length>0&&route.length<bestLen){best=cell;bestLen=route.length;}
+        }
+        return best;
     }
 
     private int guardianDefenderQuota(){
@@ -757,8 +779,18 @@ public final class CaveScreen extends ScreenAdapter {
     private int rowForY(float y){return Math.max(0,Math.min(map.rows-1,(int)((y-worldT)/cellH)));}
 
     private void drawRockMass(Draw d){
-        d.setColor(0xFF151614);d.fillRect(worldL,worldT,worldR,worldB);long seed=map.seed;
-        int count=workers.size()>90?46:82;for(int i=0;i<count;i++){long q=seed+i*0x9E3779B97F4A7C15L;float x=worldL+hash01(q)*(worldR-worldL),y=worldT+hash01(q^0xA5A5A5A5L)*(worldB-worldT),rr=(2f+hash01(q^0x55AA55AAL)*8f)*ui;int c=i%7==0?0xFF2A3027:i%5==0?0xFF2A2722:0xFF201F1C;d.setColor(c);d.fillOval(x-rr*1.5f,y-rr*.65f,x+rr*1.5f,y+rr*.65f);if(i%13==0){d.setColor(0x553A6C3D);d.fillCircle(x-rr*.4f,y-rr*.18f,rr*.55f);d.fillCircle(x+rr*.2f,y-rr*.25f,rr*.38f);}}
+        d.setColor(0xFF272720);d.fillRect(worldL,worldT,worldR,worldB);long seed=map.seed;
+        int count=workers.size()>100?44:76;
+        for(int i=0;i<count;i++){
+            long q=seed+i*0x9E3779B97F4A7C15L;
+            float x=worldL+hash01(q)*(worldR-worldL),y=worldT+hash01(q^0xA5A5A5A5L)*(worldB-worldT);
+            float rr=(8f+hash01(q^0x55AA55AAL)*18f)*ui;
+            int c=i%6==0?0xFF33372E:i%4==0?0xFF302E27:i%3==0?0xFF242923:0xFF2B2A25;
+            d.setColor(c);d.fillOval(x-rr*1.45f,y-rr*.62f,x+rr*1.45f,y+rr*.62f);
+            d.setColor(i%5==0?0x443F5E3B:0x223F3A31);d.strokeWidth=Math.max(1f,1.1f*ui);
+            d.line(x-rr*.95f,y-rr*.18f,x-rr*.12f,y+rr*.08f);d.line(x-rr*.12f,y+rr*.08f,x+rr*.76f,y-rr*.11f);
+            if(i%9==0){d.setColor(0x553F6940);d.fillCircle(x-rr*.34f,y-rr*.16f,rr*.28f);d.fillCircle(x+rr*.02f,y-rr*.22f,rr*.20f);}
+        }
     }
 
     private void drawTunnels(Draw d){
@@ -789,27 +821,20 @@ public final class CaveScreen extends ScreenAdapter {
         for(int r=0;r<map.rows;r++)for(int c=0;c<map.cols;c++){
             int cell=map.index(c,r);if(!isDarkCell(cell))continue;
             float base=Math.min(cellW,cellH),x=cx(c),y=cy(r),phase=hash01(map.seed^cell*0x6A09E667F3BCC909L)*6.28318f;
-            // Broad, low-alpha fog body. The underlying stone/tunnel always remains visible.
-            for(int i=0;i<11;i++){
-                float a=phase+i*.571f+(float)Math.sin(elapsed*.18f+cell+i)*.08f;
-                float ring=base*(i<3?.12f:.18f+.035f*(i%4));
-                float ox=(float)Math.cos(a)*ring,oy=(float)Math.sin(a*1.17f)*ring*.78f;
-                float rad=base*(.30f+.035f*(i%5));
-                d.setColor(i<3?0x3C11161A:0x2811171B);d.fillCircle(x+ox,y+oy,rad);
-            }
-            // Wispy fringe destroys the square-cell silhouette.
-            for(int i=0;i<7;i++){
-                float a=phase+i*.897f-elapsed*.07f,rr=base*(.34f+.05f*(i%3));
-                float wx=x+(float)Math.cos(a)*rr,wy=y+(float)Math.sin(a)*rr*.72f;
-                d.setColor(0x18151B1E);d.fillOval(wx-base*.18f,wy-base*.10f,wx+base*.18f,wy+base*.10f);
+            for(int i=0;i<13;i++){
+                float a=phase+i*.483f+(float)Math.sin(elapsed*.13f+i+cell)*.13f;
+                float ring=base*(.08f+.31f*hash01(cell*131L+i*17L));
+                float ox=(float)Math.cos(a)*ring,oy=(float)Math.sin(a)*ring*.68f;
+                float rx=base*(.17f+.11f*hash01(cell*79L+i*23L));
+                float ry=rx*(.42f+.24f*hash01(cell*47L+i*29L));
+                d.setColor(i<4?0x28101618:0x1B12191B);d.fillOval(x+ox-rx,y+oy-ry,x+ox+rx,y+oy+ry);
             }
         }
-        // A gnome carries a small local pool of visibility, not a hard-edged flashlight disc.
         for(Worker w:workers)if(isDarkCell(cellFor(w.x,w.y))){
             float rr=(19f+w.tier.ordinal()*2f)*ui;
-            d.setColor(0x1852A5B5);d.fillCircle(w.x,w.y,rr*1.30f);
-            d.setColor(0x24D5B56A);d.fillCircle(w.x,w.y,rr*.58f);
-            d.setColor(0x30FFE09A);d.fillCircle(w.x,w.y,rr*.22f);
+            d.setColor(0x1452A5B5);d.fillCircle(w.x,w.y,rr*1.32f);
+            d.setColor(0x22D5B56A);d.fillCircle(w.x,w.y,rr*.62f);
+            d.setColor(0x2CFFE09A);d.fillCircle(w.x,w.y,rr*.24f);
         }
     }
     private void drawPortal(Draw d){if(portal==null)return;float p=Math.min(1f,portal.age/.42f),close=portal.next>=portal.queue.length?Math.max(0,1-portal.closeAge):1f,rr=Math.min(cellW,cellH)*.34f*p*close;d.setColor(0x444E1D6D);d.fillCircle(portal.x,portal.y,rr*1.3f);for(int i=0;i<5;i++){float a=elapsed*(2.5f+i*.3f)+i*1.25f;d.setColor(i%2==0?0xFFB34CE2:0xFFE45658);d.strokeWidth=(1.2f+i*.25f)*ui;d.strokeCircle(portal.x+(float)Math.cos(a)*rr*.12f,portal.y+(float)Math.sin(a)*rr*.12f,rr*(.58f+i*.09f));}}
@@ -1104,10 +1129,10 @@ public final class CaveScreen extends ScreenAdapter {
     private void drawGnomePanel(Draw d){GnomeTier gt=GnomeTier.values()[selectedTier];float ct=contentTop();button(d,left,"‹",selectedTier>0,1.15f);button(d,right,"›",selectedTier<GnomeTier.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=8.2f*ui;d.setColor(gt.color);d.text(gt.title,width/2,ct+16f*ui);d.textSize=6.7f*ui;d.setColor(0xFFF1D58A);d.text("ГНОМОВ: "+state.tierCounts[selectedTier],width*.31f,ct+37f*ui);d.setColor(0xFFB9C8D0);d.text("ДОБЫЧА: "+one.format(gt.miningPower*state.tierPowerMultiplier(selectedTier)*state.miningMultiplier(selectedTier))+"/УДАР",width*.69f,ct+37f*ui);d.align=Draw.Align.LEFT;d.bold=false;
         if(selectedTier==0)button(d,primary,"КУПИТЬ • "+format(state.minerBuyCost()),true,.72f);else statPill(d,primary,"УР. "+state.tierLevels[selectedTier]+" • БОЙ "+one.format(gt.combatPower*state.combatMultiplier(selectedTier)));button(d,secondary,"УЛУЧШИТЬ • "+format(state.tierUpgradeCost(selectedTier)),true,.66f);boolean merge=selectedTier<GnomeTier.values().length-1&&(GameState.FREE_SHOP||state.tierCounts[selectedTier]>=10);button(d,tertiary,GameState.FREE_SHOP?"TEST • СЛЕДУЮЩИЙ":"СЛИТЬ 10 → 1",merge,.60f);statPill(d,quaternary,"СУМКА • "+format((long)(gt.cargoCapacity*state.carryMultiplier(selectedTier))));}
 
-    private void drawUpgradePanel(Draw d){float ct=contentTop();d.align=Draw.Align.CENTER;d.bold=true;d.textSize=10.5f*ui;d.setColor(0xFFF0F3F5);d.text("ШАХТА И ИНФРАСТРУКТУРА",width/2,ct+18f*ui);d.bold=false;d.align=Draw.Align.LEFT;button(d,primary,"КИРКИ ур."+state.miningUpgrade,true,.70f);button(d,secondary,"ЛОГИСТИКА ур."+state.speedUpgrade,true,.66f);button(d,tertiary,"БОЙ ур."+state.combatUpgrade,true,.70f);button(d,quaternary,state.guardianLevel==0?"НАНЯТЬ СТРАЖА":"СТРАЖ ур."+state.guardianLevel,true,.66f);}
-    private void drawArtifactPanel(Draw d){ArtifactType a=ArtifactType.values()[selectedArtifact];float ct=contentTop();button(d,left,"‹",selectedArtifact>0,1.15f);button(d,right,"›",selectedArtifact<ArtifactType.values().length-1,1.15f);boolean owned=state.artifactOwned(selectedArtifact),active=owned&&state.artifactActive[selectedArtifact];d.align=Draw.Align.CENTER;d.bold=true;d.textSize=8.0f*ui;d.setColor(a.color);d.text(a.title,width/2,ct+16f*ui);d.bold=false;d.textSize=5.5f*ui;d.setColor(0xFFB5BFC7);d.text(ellipsize(a.description,30),width/2,ct+35f*ui);d.textSize=5.1f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text(owned?(active?"АКТИВЕН":"СНЯТ"):"НЕ КУПЛЕН",width/2,ct+50f*ui);d.align=Draw.Align.LEFT;button(d,primary,owned?(active?"СНЯТЬ":"НАДЕТЬ"):"КУПИТЬ • ◆"+state.artifactCost(selectedArtifact),true,.66f);statPill(d,secondary,"ПОКУПАЕТСЯ 1 РАЗ");statPill(d,tertiary,owned?"КУПЛЕН":"НУЖНЫ ◆ АЛМАЗЫ");statPill(d,quaternary,active?"АКТИВЕН":"НЕ АКТИВЕН");}
+    private void drawUpgradePanel(Draw d){float ct=contentTop();d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.0f*ui;d.setColor(0xFFF0F3F5);d.text("ШАХТА И ИНФРАСТРУКТУРА",width/2,ct+17f*ui);d.bold=false;d.align=Draw.Align.LEFT;button(d,primary,"КИРКИ ур."+state.miningUpgrade,true,.70f);button(d,secondary,"ЛОГИСТИКА ур."+state.speedUpgrade,true,.66f);button(d,tertiary,"БОЙ ур."+state.combatUpgrade,true,.70f);button(d,quaternary,state.guardianLevel==0?"НАНЯТЬ СТРАЖА":"СТРАЖ ур."+state.guardianLevel,true,.66f);}
+    private void drawArtifactPanel(Draw d){ArtifactType a=ArtifactType.values()[selectedArtifact];float ct=contentTop();button(d,left,"‹",selectedArtifact>0,1.15f);button(d,right,"›",selectedArtifact<ArtifactType.values().length-1,1.15f);boolean owned=state.artifactOwned(selectedArtifact),active=owned&&state.artifactActive[selectedArtifact];d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.2f*ui;d.setColor(a.color);d.text(a.title,width/2,ct+14f*ui);d.bold=false;d.textSize=4.8f*ui;d.setColor(0xFFB5BFC7);d.text(ellipsize(a.description,27),width/2,ct+30f*ui);d.textSize=4.5f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text(owned?(active?"АКТИВЕН":"СНЯТ"):"НЕ КУПЛЕН",width/2,ct+43f*ui);d.align=Draw.Align.LEFT;button(d,primary,owned?(active?"СНЯТЬ":"НАДЕТЬ"):"КУПИТЬ • ◆"+state.artifactCost(selectedArtifact),true,.62f);statPill(d,secondary,"ПОКУПАЕТСЯ 1 РАЗ");statPill(d,tertiary,owned?"КУПЛЕН":"НУЖНЫ ◆ АЛМАЗЫ");statPill(d,quaternary,active?"АКТИВЕН":"НЕ АКТИВЕН");}
 
-    private void drawRunePanel(Draw d){RuneType r=RuneType.values()[selectedRune];float ct=contentTop();button(d,left,"‹",selectedRune>0,1.15f);button(d,right,"›",selectedRune<RuneType.values().length-1,1.15f);boolean active=state.runeIsActive(selectedRune);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=8.0f*ui;d.setColor(r.color);d.text(r.title,width/2,ct+16f*ui);d.bold=false;d.textSize=5.5f*ui;d.setColor(0xFFB7C0C7);d.text(ellipsize(r.description,30),width/2,ct+35f*ui);d.textSize=5.1f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text("УР. "+state.runeLevels[selectedRune]+" • "+(active?"АКТИВНА":"СНЯТА"),width/2,ct+50f*ui);d.align=Draw.Align.LEFT;button(d,primary,"УСИЛИТЬ • ◆"+state.runeUpgradeCost(selectedRune),state.runeLevels[selectedRune]<12,.62f);button(d,secondary,active?"СНЯТЬ РУНУ":"АКТИВИРОВАТЬ",state.runeLevels[selectedRune]>0,.58f);statPill(d,tertiary,"НА ВСЕХ ГНОМОВ");statPill(d,quaternary,"МЕТА • НАВСЕГДА");}
+    private void drawRunePanel(Draw d){RuneType r=RuneType.values()[selectedRune];float ct=contentTop();button(d,left,"‹",selectedRune>0,1.15f);button(d,right,"›",selectedRune<RuneType.values().length-1,1.15f);boolean active=state.runeIsActive(selectedRune);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.2f*ui;d.setColor(r.color);d.text(r.title,width/2,ct+14f*ui);d.bold=false;d.textSize=4.8f*ui;d.setColor(0xFFB7C0C7);d.text(ellipsize(r.description,27),width/2,ct+30f*ui);d.textSize=4.5f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text("УР. "+state.runeLevels[selectedRune]+" • "+(active?"АКТИВНА":"СНЯТА"),width/2,ct+43f*ui);d.align=Draw.Align.LEFT;button(d,primary,"УСИЛИТЬ • ◆"+state.runeUpgradeCost(selectedRune),state.runeLevels[selectedRune]<12,.58f);button(d,secondary,active?"СНЯТЬ РУНУ":"АКТИВИРОВАТЬ",state.runeLevels[selectedRune]>0,.54f);statPill(d,tertiary,"НА ВСЕХ ГНОМОВ");statPill(d,quaternary,"МЕТА • НАВСЕГДА");}
 
 
     private void button(Draw d,Box b,String text,boolean enabled,float scale){
