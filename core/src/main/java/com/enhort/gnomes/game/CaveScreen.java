@@ -1487,15 +1487,13 @@ public final class CaveScreen extends ScreenAdapter {
     }
     private void drawObjectiveHud(Draw d){
         // Keep the objective readable, but avoid a filled translucent plate: on some Android GPUs the
-        // blended rounded rectangle renders as a solid smear. A breathing text/underline cue is cleaner.
+        // blended rounded rectangle renders as a solid smear. Keep the cue to text and edge dots only.
         float pulse=.5f+.5f*(float)Math.sin(elapsed*3.0f);
         float cx=width*.66f,cy=42f*ui,w=Math.min(width*.48f,190f*ui);
         int col=levelObjectiveMet()?0xFF79C98A:0xFFE2B544;
         float dot=1.0f*ui+.55f*ui*pulse;
         d.setColor(alpha(col,.42f+.42f*pulse));
         d.fillCircle(cx-w*.47f,cy-1f*ui,dot);d.fillCircle(cx+w*.47f,cy-1f*ui,dot);
-        d.setColor(alpha(col,.32f+.48f*pulse));
-        d.fillRoundRect(cx-w*.30f,cy+8.2f*ui,cx+w*.30f,cy+9.1f*ui,.45f*ui);
         d.align=Draw.Align.CENTER;
         d.bold=false;
         d.textSize=(5.15f+.16f*pulse)*ui;
