@@ -1486,17 +1486,22 @@ public final class CaveScreen extends ScreenAdapter {
         drawActiveEffects(d);
     }
     private void drawObjectiveHud(Draw d){
+        // Keep the objective readable, but avoid a filled translucent plate: on some Android GPUs the
+        // blended rounded rectangle renders as a solid smear. A breathing text/underline cue is cleaner.
         float pulse=.5f+.5f*(float)Math.sin(elapsed*3.0f);
-        float cx=width*.66f,cy=42f*ui,w=Math.min(width*.52f,210f*ui);
+        float cx=width*.66f,cy=42f*ui,w=Math.min(width*.48f,190f*ui);
         int col=levelObjectiveMet()?0xFF79C98A:0xFFE2B544;
-        d.setColor(alpha(col,.035f+.055f*pulse));
-        d.fillRoundRect(cx-w*.5f,cy-10f*ui,cx+w*.5f,cy+9f*ui,7f*ui);
-        d.setColor(alpha(col,.22f+.36f*pulse));
-        d.fillRoundRect(cx-w*.34f,cy+8.5f*ui,cx+w*.34f,cy+9.7f*ui,.7f*ui);
-        d.setColor(alpha(col,.40f+.45f*pulse));
-        float dot=1.4f*ui+.7f*ui*pulse;
-        d.fillCircle(cx-w*.43f,cy-1f*ui,dot);d.fillCircle(cx+w*.43f,cy-1f*ui,dot);
-        d.align=Draw.Align.CENTER;d.bold=pulse>.62f;d.textSize=(5.25f+.22f*pulse)*ui;d.setColor(col);d.text(levelObjectiveHud(),cx,cy);d.bold=false;
+        float dot=1.0f*ui+.55f*ui*pulse;
+        d.setColor(alpha(col,.42f+.42f*pulse));
+        d.fillCircle(cx-w*.47f,cy-1f*ui,dot);d.fillCircle(cx+w*.47f,cy-1f*ui,dot);
+        d.setColor(alpha(col,.32f+.48f*pulse));
+        d.fillRoundRect(cx-w*.30f,cy+8.2f*ui,cx+w*.30f,cy+9.1f*ui,.45f*ui);
+        d.align=Draw.Align.CENTER;
+        d.bold=pulse>.70f;
+        d.textSize=(5.15f+.16f*pulse)*ui;
+        d.setColor(col);
+        d.text(levelObjectiveHud(),cx,cy);
+        d.bold=false;
     }
 
     private void drawActiveEffects(Draw d){float x=width-8f*ui,y=worldT+10f*ui;int n=0;for(int i=0;i<state.artifactActive.length;i++)if(state.artifactOwned(i)&&state.artifactActive[i]){ArtifactType a=ArtifactType.values()[i];x-=15f*ui;d.setColor(alpha(a.color,.28f));d.fillCircle(x,y,6f*ui);d.setColor(a.color);d.strokeWidth=1.2f*ui;d.strokeCircle(x,y,4f*ui);n++;}for(int i=0;i<state.runeActive.length;i++)if(state.runeIsActive(i)){x-=15f*ui;drawRune(d,x,y,3.4f*ui,RuneType.values()[i]);n++;if(n>10)break;}}
