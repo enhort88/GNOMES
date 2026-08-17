@@ -840,7 +840,26 @@ public final class CaveScreen extends ScreenAdapter {
         if(t==EnemyType.ELEMENTAL_KING)spawnMob(t);else openPortal(t,1);
     }
     private void openPortal(EnemyType type,int n){EnemyType[] q=new EnemyType[n];java.util.Arrays.fill(q,type);openPortal(q);}
-    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}
+    private int pickPortalCell(){
+        List<Integer> out=map.outerCells();
+        int home=map.index(map.startCol,map.startRow);
+        List<Integer> safe=new ArrayList<>();
+        int farthest=-1,farthestSteps=-1;
+        for(int cell:out){
+            if(cell==home||map.isBlocked(cell))continue;
+            int[] route=map.pathIgnoringBlocks(home,cell);
+            if(route.length==0)continue;
+            int steps=route.length-1;
+            if(steps>farthestSteps){farthestSteps=steps;farthest=cell;}
+            // Four tunnel steps is still close enough to feel dangerous, but gives the player time to react.
+            if(steps>=4)safe.add(cell);
+        }
+        if(!safe.isEmpty())return safe.get(random.nextInt(safe.size()));
+        if(farthest>=0)return farthest;
+        for(int cell:out)if(cell!=home)return cell;
+        return home;
+    }
+    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;int cell=pickPortalCell();portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}
     private void spawnMob(EnemyType type){List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));mobs.add(createMob(type,cx(map.col(cell)),cy(map.row(cell))));}
     private Mob createMob(EnemyType type,float x,float y){Mob m=new Mob(type,x,y,random.nextFloat()*6.28f);m.maxHp=type.hp*state.enemyHpScale(type);m.hp=m.maxHp;m.ghostSteals=type==EnemyType.GHOST&&random.nextFloat()<.62f;return m;}
     private void spawnGhostFrom(Vein v){Mob m=createMob(EnemyType.GHOST,v.x,v.y);m.spawn=.52f;m.target=nearestWorker(v.x,v.y);mobs.add(m);toast="ИЗ КАМНЯ ВЫРВАЛСЯ ПРИЗРАК";toastTime=1.5f;}
