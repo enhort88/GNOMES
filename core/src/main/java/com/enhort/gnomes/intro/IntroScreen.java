@@ -12,7 +12,7 @@ import com.enhort.gnomes.draw.Draw;
 /** Short cinematic prologue: three full-screen story frames, no card UI and no character-count wrapping. */
 public final class IntroScreen extends ScreenAdapter {
     private static final String[] IMAGE = {
-            "intro/story_home.png", "intro/story_mine.png", "intro/story_enemies.png"
+            "intro/story_home.jpg", "intro/story_mine.jpg", "intro/story_enemies.jpg"
     };
     private static final String[] TITLE = {
             "ДОМ ПОД ГОРОЙ", "ГЛУБЖЕ", "МЫ НЕ ОДНИ"
@@ -157,7 +157,7 @@ public final class IntroScreen extends ScreenAdapter {
     }
 
     /**
-     * Dark-fantasy fallback for development builds. Release art uses the story_*.png frames above.
+     * Dark-fantasy fallback for development builds. Release art uses the story_*.jpg frames above.
      * It deliberately avoids the old flat "two gnomes standing on rectangles" placeholder composition.
      */
     private void fallbackArt(Draw d, int p) {
