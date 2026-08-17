@@ -19,7 +19,9 @@ jobs:
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
       - name: Apply cave polish
-        run: python3 tools/fix_cave_visuals_v064.py
+        run: |
+          python3 tools/fix_cave_visuals_v064.py
+          python3 tools/fix_cave_visuals_v064_compile.py
       - name: Static checks
         run: |
           grep -q 'private void applyPit' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
@@ -27,6 +29,7 @@ jobs:
           grep -q 'private void drawPlantPatch' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
           grep -q 'private int floodDirection' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
           grep -q 'float sizeJitter=.155f' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
+          grep -q 'rubblePct' core/src/main/java/com/enhort/gnomes/game/CaveScreen.java
       - name: Compile core
         run: ./gradlew -PskipAndroid :core:compileJava --stacktrace
       - name: Build Android debug APK
