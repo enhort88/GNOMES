@@ -28,27 +28,30 @@ jobs:
           from pathlib import Path
           p = Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java')
           s = p.read_text()
-          old = '''    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}'''
-          new = '''    private int pickPortalCell(){
-        List<Integer> out=map.outerCells();
-        int home=map.index(map.startCol,map.startRow);
-        List<Integer> safe=new ArrayList<>();
-        int farthest=-1,farthestSteps=-1;
-        for(int cell:out){
-            if(cell==home||map.isBlocked(cell))continue;
-            int[] route=map.pathIgnoringBlocks(home,cell);
-            if(route.length==0)continue;
-            int steps=route.length-1;
-            if(steps>farthestSteps){farthestSteps=steps;farthest=cell;}
-            // Four tunnel steps is still close enough to feel dangerous, but gives the player time to react.
-            if(steps>=4)safe.add(cell);
-        }
-        if(!safe.isEmpty())return safe.get(random.nextInt(safe.size()));
-        if(farthest>=0)return farthest;
-        for(int cell:out)if(cell!=home)return cell;
-        return home;
-    }
-    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;int cell=pickPortalCell();portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}'''
+          old = '    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;List<Integer> out=map.outerCells();int cell=out.get(random.nextInt(out.size()));portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}'
+          lines = [
+              '    private int pickPortalCell(){',
+              '        List<Integer> out=map.outerCells();',
+              '        int home=map.index(map.startCol,map.startRow);',
+              '        List<Integer> safe=new ArrayList<>();',
+              '        int farthest=-1,farthestSteps=-1;',
+              '        for(int cell:out){',
+              '            if(cell==home||map.isBlocked(cell))continue;',
+              '            int[] route=map.pathIgnoringBlocks(home,cell);',
+              '            if(route.length==0)continue;',
+              '            int steps=route.length-1;',
+              '            if(steps>farthestSteps){farthestSteps=steps;farthest=cell;}',
+              '            // Four tunnel steps is still close enough to feel dangerous, but gives the player time to react.',
+              '            if(steps>=4)safe.add(cell);',
+              '        }',
+              '        if(!safe.isEmpty())return safe.get(random.nextInt(safe.size()));',
+              '        if(farthest>=0)return farthest;',
+              '        for(int cell:out)if(cell!=home)return cell;',
+              '        return home;',
+              '    }',
+              '    private void openPortal(EnemyType[] q){if(portal!=null||q.length==0)return;int cell=pickPortalCell();portal=new Portal(cell,cx(map.col(cell)),cy(map.row(cell)),q);}'
+          ]
+          new = '\n'.join(lines)
           if old not in s:
               raise SystemExit('openPortal block not found')
           p.write_text(s.replace(old, new, 1))
