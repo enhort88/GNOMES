@@ -1497,7 +1497,7 @@ public final class CaveScreen extends ScreenAdapter {
         d.setColor(alpha(col,.32f+.48f*pulse));
         d.fillRoundRect(cx-w*.30f,cy+8.2f*ui,cx+w*.30f,cy+9.1f*ui,.45f*ui);
         d.align=Draw.Align.CENTER;
-        d.bold=pulse>.70f;
+        d.bold=false;
         d.textSize=(5.15f+.16f*pulse)*ui;
         d.setColor(col);
         d.text(levelObjectiveHud(),cx,cy);
