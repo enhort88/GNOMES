@@ -1471,7 +1471,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void resetWorkerRoutes(){for(Worker w:workers){w.goalCell=-1;w.path=new int[0];w.pathIndex=0;w.routeRetry=0;}}
     private void clearPriority(boolean notify){priorityKind=PriorityKind.NONE;priorityVein=null;priorityMob=null;priorityHazard=null;priorityCell=-1;if(notify){toast="ПРИОРИТЕТ СНЯТ";toastTime=1f;}}
     private void setupObjective(){
-        if(state.depth==1)objectiveType=ObjectiveType.ASCEND_GNOME;else if(state.depth%10==0)objectiveType=ObjectiveType.BOSS_HUNT;else objectiveType=ObjectiveType.values()[Math.floorMod(state.depth+slot*3,5)];objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;
+        if(state.depth==1){objectiveType=ObjectiveType.ASCEND_GNOME;}else if(state.depth%10==0){objectiveType=ObjectiveType.BOSS_HUNT;}else{ObjectiveType[] pool={ObjectiveType.CLEAR_VEINS,ObjectiveType.GUARDIAN,ObjectiveType.DEMON_PURGE,ObjectiveType.BOSS_HUNT,ObjectiveType.TREASURE};objectiveType=pool[Math.floorMod(state.depth+slot*3,pool.length)];}objectiveStartKills=state.enemiesDefeated;objectiveTarget=0;objectiveTreasureTarget=0;objectiveStarted=false;
         switch(objectiveType){case GUARDIAN->objectiveTarget=2+Math.min(2,state.depth/15);case DEMON_PURGE->objectiveTarget=3+Math.min(8,state.depth/3);case TREASURE->objectiveTreasureTarget=state.walletValue()+600L+state.depth*220L;default->{}}
     }
     private void updateObjective(){
