@@ -93,6 +93,12 @@ public final class CaveScreen extends ScreenAdapter {
         Notice(String text,int color,float life){this.text=text;this.color=color;this.life=this.maxLife=life;}
     }
 
+    private static final class BonusCache {
+        final int cell; final RockType.Material material; final long amount; final float x,y;
+        boolean taken; float pulse;
+        BonusCache(int cell,RockType.Material material,long amount,float x,float y){this.cell=cell;this.material=material;this.amount=amount;this.x=x;this.y=y;}
+    }
+
     private static final class CaveHazard {
         final HazardType type; final int cell; final float x,y,r;
         float age,rubbleHp,rubbleMaxHp; boolean fired,obstacleActive,cleared;
@@ -118,6 +124,7 @@ public final class CaveScreen extends ScreenAdapter {
     private final List<CaveHazard> hazards=new ArrayList<>();
     private final List<Mob> pendingMobs=new ArrayList<>();
     private final List<Notice> notices=new ArrayList<>();
+    private final List<BonusCache> bonuses=new ArrayList<>();
     private Portal portal;
 
     private CaveMap map;
@@ -241,7 +248,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void generateDepth(boolean advance){
         if(width<=0||height<=0)return;
         if(advance){state.depth++;state.depthProgress=0;saveNow();}
-        mobs.clear();pendingMobs.clear();hazards.clear();fx.clear();veins.clear();portal=null;clearPriority(false);objectiveReminderShown=false;levelSummary=false;gameOver=false;summaryAnim=0;objectiveStarted=false;buyHold=false;
+        mobs.clear();pendingMobs.clear();hazards.clear();fx.clear();veins.clear();bonuses.clear();portal=null;clearPriority(false);objectiveReminderShown=false;levelSummary=false;gameOver=false;summaryAnim=0;objectiveStarted=false;buyHold=false;
         int cols=9;
         int rows=Math.max(9,Math.min(13,Math.round((worldB-worldT)/(width/cols))));
         long seed=0x9E3779B97F4A7C15L^(long)slot*0xBF58476D1CE4E5B9L^(long)state.depth*0x94D049BB133111EBL;
@@ -250,6 +257,7 @@ public final class CaveScreen extends ScreenAdapter {
         random.setSeed(seed^0x1234FEDCBA98765L);
         levelEvent=pickLevelEvent(seed);
         buildVeins();
+        buildBonuses();
         syncWorkers(true);
         guardianX=cx(map.startCol)-Math.min(cellW,cellH)*.28f;guardianY=cy(map.startRow);guardianMaxHp=state.guardianMaxHp();guardianHp=guardianMaxHp;guardianDead=state.guardianLevel<=0;guardianTarget=null;guardianPath=new int[0];guardianPathIndex=0;guardianGoal=-1;
         enemyTimer=Math.max(7f,18f-state.depth*.18f)+random.nextFloat()*7f;
@@ -286,6 +294,56 @@ public final class CaveScreen extends ScreenAdapter {
             Vein v=new Vein(type,cell,side,random.nextInt(),x,y,radius,hp);v.spawn=.20f+random.nextFloat()*.38f;veins.add(v);
         }
     }
+
+    private void buildBonuses(){
+        List<Integer> ends=map.deadEnds();
+        java.util.Collections.shuffle(ends,random);
+        int home=map.index(map.startCol,map.startRow),limit=Math.min(3,1+state.depth/8),made=0;
+        for(int cell:ends){
+            if(made>=limit)break;
+            if(cell==home||hasLivingVeinAt(cell))continue;
+            if(random.nextFloat()>.34f)continue;
+            RockType.Material material=chooseBonusMaterial();
+            long amount=bonusAmount(material);
+            bonuses.add(new BonusCache(cell,material,amount,cx(map.col(cell)),cy(map.row(cell))));made++;
+        }
+    }
+    private boolean hasLivingVeinAt(int cell){for(Vein v:veins)if(!v.dead&&v.cell==cell)return true;return false;}
+    private RockType.Material chooseBonusMaterial(){
+        float q=random.nextFloat();
+        if(state.depth>=9&&q<.07f)return RockType.Material.DIAMOND;
+        if(state.depth>=5&&q<.34f)return RockType.Material.GOLD;
+        if(state.depth>=2&&q<.72f)return RockType.Material.SILVER;
+        return RockType.Material.STONE;
+    }
+    private long bonusAmount(RockType.Material material){return switch(material){
+        case STONE -> 70L+state.depth*22L+random.nextInt(70);
+        case SILVER -> 5L+state.depth*2L+random.nextInt(8);
+        case GOLD -> 2L+state.depth/2L+random.nextInt(5);
+        case DIAMOND -> 1L+state.depth/12L;
+    };}
+    private String bonusLabel(BonusCache b){return switch(b.material){case STONE->"● "+b.amount;case SILVER->"Ag "+b.amount;case GOLD->"Au "+b.amount;case DIAMOND->"◆ "+b.amount;};}
+    private int bonusColor(BonusCache b){return switch(b.material){case STONE->0xFFB7BDC2;case SILVER->0xFFE2EAF0;case GOLD->0xFFFFD35A;case DIAMOND->0xFF67D7F2;};}
+    private void updateBonuses(float dt){
+        for(BonusCache b:bonuses){
+            if(b.taken)continue;b.pulse+=dt;
+            for(Worker w:workers){
+                if(distance(w.x,w.y,b.x,b.y)>Math.min(cellW,cellH)*.24f)continue;
+                b.taken=true;state.grantBonus(b.material,b.amount);spawnSparks(b.x,b.y,bonusColor(b),8);game.audio.play(GameAudio.Sfx.COIN,.76f);game.audio.vibrate(24);
+                toast="ТАЙНИК • +"+bonusLabel(b);toastTime=1.7f;addNotice("НАЙДЕН ТАЙНИК • +"+bonusLabel(b),bonusColor(b),2.4f);
+                if(priorityKind==PriorityKind.POINT&&priorityCell==b.cell){clearPriority(false);resetWorkerRoutes();}
+                break;
+            }
+        }
+    }
+    private void drawBonuses(Draw d){
+        for(BonusCache b:bonuses){if(b.taken)continue;float p=.5f+.5f*(float)Math.sin(elapsed*3.8f+b.cell),sz=Math.min(cellW,cellH)*.18f;
+            d.setColor(alpha(bonusColor(b),.10f+.08f*p));d.fillCircle(b.x,b.y,sz*1.75f);
+            d.setColor(0xFF5A351E);d.fillRoundRect(b.x-sz*.62f,b.y-sz*.30f,b.x+sz*.62f,b.y+sz*.42f,sz*.15f);
+            d.setColor(0xFF8A572D);d.fillRoundRect(b.x-sz*.58f,b.y-sz*.46f,b.x+sz*.58f,b.y-sz*.08f,sz*.18f);
+            d.setColor(0xFFFFC85A);d.fillRect(b.x-sz*.09f,b.y-sz*.16f,b.x+sz*.09f,b.y+sz*.18f);
+            d.setColor(bonusColor(b));for(int i=0;i<3;i++){float a=elapsed*1.7f+i*2.094f;d.fillCircle(b.x+(float)Math.cos(a)*sz*.86f,b.y+(float)Math.sin(a)*sz*.66f,(1.2f+p)*ui);}
+        }}
 
     private RockType chooseRockType(int salt){
         float r=random.nextFloat();int d=state.depth;
@@ -350,7 +408,7 @@ public final class CaveScreen extends ScreenAdapter {
         if(levelSummary){summaryAnim=Math.min(3f,summaryAnim+dt);updateFx(dt);return;}
         if(gameOver){updateFx(dt);return;}
 
-        updateVeins(dt);updatePortal(dt);updateGuardian(dt);updateMobs(dt);updateHazards(dt);updateWorkers(dt*workerTimeScale);updateFx(dt);updateObjective();updateResourceRecovery(dt);
+        updateVeins(dt);updatePortal(dt);updateGuardian(dt);updateMobs(dt);updateHazards(dt);updateWorkers(dt*workerTimeScale);updateBonuses(dt);updateFx(dt);updateObjective();updateResourceRecovery(dt);
 
         enemyTimer-=dt;hazardTimer-=dt;saveTimer+=dt;
         if(state.totalGnomes()>=5&&enemyTimer<=0&&portal==null&&pendingBoss==null){spawnEnemyWave();enemyTimer=Math.max(7f,24f-state.depth*.28f)+random.nextFloat()*9f;if(levelEvent==LevelEvent.QUIET)enemyTimer*=2.1f;if(levelEvent==LevelEvent.IMP_SWARM)enemyTimer*=.58f;}
@@ -960,7 +1018,7 @@ public final class CaveScreen extends ScreenAdapter {
     private void spawnSparks(float x,float y,int color,int n){n=Math.min(n,fxBudget(n,Math.max(1,n/2)));for(int i=0;i<n;i++){float a=random.nextFloat()*6.28f,sp=(25+random.nextFloat()*85)*ui;fx.add(new Fx(x,y,(float)Math.cos(a)*sp,(float)Math.sin(a)*sp,.18f+random.nextFloat()*.3f,(1+random.nextFloat()*1.7f)*ui,color,true));}}
 
     private void drawWorld(Draw d){
-        d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawWetCorridors(d);drawCaveDecor(d);drawHazards(d);drawVeins(d);drawChest(d);drawPortal(d);
+        d.setColor(0xFF0B0A09);d.fillRect(worldL,worldT,worldR,worldB);drawRockMass(d);drawTunnels(d);drawWetCorridors(d);drawCaveDecor(d);drawHazards(d);drawVeins(d);drawBonuses(d);drawChest(d);drawPortal(d);
         for(int row=0;row<map.rows;row++){for(Worker w:workers)if(rowForY(w.y)==row){drawWorker(d,w);drawWorkerStatus(d,w);}for(Mob m:mobs)if(rowForY(m.y)==row)drawMob(d,m);}
         if(state.guardianLevel>0&&!guardianDead){float gs=Math.min(cellW,cellH)*.54f;drawGuardian(d,guardianX,guardianY,gs);drawGuardianHealth(d,guardianX,guardianY,gs);}
         drawPriorityOverlay(d);for(Fx p:fx)drawFx(d,p);drawDarkZones(d);drawAtmosphere(d);drawBossHud(d);
@@ -1411,9 +1469,9 @@ public final class CaveScreen extends ScreenAdapter {
         d.align=Draw.Align.LEFT;d.bold=true;d.textSize=10.8f*ui;d.setColor(0xFFF2EFE7);d.text("GNOMES",58f*ui,21f*ui);
         d.bold=false;d.textSize=6.2f*ui;d.setColor(UiTheme.GOLD);d.text("ГЛУБИНА "+state.depth,58f*ui,42f*ui);
         d.align=Draw.Align.CENTER;d.textSize=5.4f*ui;d.setColor(levelObjectiveMet()?0xFF79C98A:0xFFE2B544);d.text(levelObjectiveHud(),width*.66f,42f*ui);
-        if(levelEvent!=LevelEvent.NONE){d.textSize=4.1f*ui;d.setColor(levelEventColor());d.text(levelEventTitle(),width*.66f,57f*ui);}
+        if(levelEvent!=LevelEvent.NONE){d.textSize=3.7f*ui;d.setColor(levelEventColor());d.text(levelEventTitle(),width*.66f,52f*ui);}
         d.align=Draw.Align.LEFT;
-        float y=65f*ui,section=width/4f;
+        float y=69f*ui,section=width/4f;
         drawResource(d,7f*ui,y,0xFF888D92,"●",state.stone);
         drawResource(d,section+5f*ui,y,0xFFC6D0D8,"Ag",state.silver);
         drawResource(d,section*2+5f*ui,y,0xFFE2B544,"Au",state.gold);
@@ -1428,15 +1486,22 @@ public final class CaveScreen extends ScreenAdapter {
         String[] names={"ГНОМЫ","АПГРЕЙДЫ","АРТЕФ.","РУНЫ"};
         for(int i=0;i<4;i++)UiTheme.tab(d,tabs[i].l,tabs[i].t,tabs[i].r,tabs[i].b,ui,names[i],tab.ordinal()==i,UiTheme.GOLD);
         switch(tab){case GNOMES->drawGnomePanel(d);case UPGRADES->drawUpgradePanel(d);case ARTIFACTS->drawArtifactPanel(d);case RUNES->drawRunePanel(d);}
-        button(d,speed,speedHeld?"ГНОМЫ РАБОТАЮТ ×4":"УСКОРИТЬ ГНОМОВ ×4",true,.86f);
+        if(speedHeld)drawSpeedGlow(d);
+        button(d,speed,speedHeld?"УСКОРЕНИЕ":"УСКОРИТЬ ГНОМОВ",true,.86f);
+    }
+    private void drawSpeedGlow(Draw d){
+        float pulse=.5f+.5f*(float)Math.sin(elapsed*11f);
+        for(int i=3;i>=1;i--){float pad=(3f+i*3.5f+pulse*2f)*ui;d.setColor(alpha(0xFFFFD45C,.045f+i*.025f));d.fillRoundRect(speed.l-pad,speed.t-pad,speed.r+pad,speed.b+pad,(12f+i*3f)*ui);}
+        d.setColor(alpha(0xFFFFE88A,.65f+.25f*pulse));
+        for(int i=0;i<10;i++){float q=(elapsed*(.28f+i*.013f)+i*.103f)%1f,x=speed.l+(speed.r-speed.l)*q,y=(i&1)==0?speed.t-3f*ui:speed.b+3f*ui;d.fillCircle(x,y,(1.4f+(i%3)*.45f)*ui);}
     }
 
     private float contentTop(){return tabs[0].b+5f*ui;}
     private void drawGnomePanel(Draw d){GnomeTier gt=GnomeTier.values()[selectedTier];float ct=contentTop();button(d,left,"‹",selectedTier>0,1.15f);button(d,right,"›",selectedTier<GnomeTier.values().length-1,1.15f);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=8.2f*ui;d.setColor(gt.color);d.text(gt.title,width/2,ct+16f*ui);d.textSize=6.7f*ui;d.setColor(0xFFF1D58A);d.text("ГНОМОВ: "+state.tierCounts[selectedTier],width*.31f,ct+37f*ui);d.setColor(0xFFB9C8D0);d.text("ДОБЫЧА: "+one.format(gt.miningPower*state.tierPowerMultiplier(selectedTier)*state.miningMultiplier(selectedTier))+"/УДАР",width*.69f,ct+37f*ui);d.align=Draw.Align.LEFT;d.bold=false;drawTierProgress(d,ct+50f*ui);
-        if(selectedTier==0)button(d,primary,"КУПИТЬ • "+format(state.minerBuyCost()),true,.72f);else statPill(d,primary,"УР. "+state.tierLevels[selectedTier]+" • БОЙ "+one.format(gt.combatPower*state.combatMultiplier(selectedTier)));button(d,secondary,"УЛУЧШИТЬ • "+format(state.tierUpgradeCost(selectedTier)),true,.66f);boolean merge=selectedTier<GnomeTier.values().length-1&&(GameState.FREE_SHOP||state.tierCounts[selectedTier]>=10);button(d,tertiary,GameState.FREE_SHOP?"TEST • СЛЕДУЮЩИЙ":"СЛИТЬ 10 → 1",merge,.60f);statPill(d,quaternary,"СУМКА • "+format((long)(gt.cargoCapacity*state.carryMultiplier(selectedTier))));}
+        if(selectedTier==0)button(d,primary,"КУПИТЬ • ● "+format(state.minerBuyCost()),true,.72f);else statPill(d,primary,"УР. "+state.tierLevels[selectedTier]+" • БОЙ "+one.format(gt.combatPower*state.combatMultiplier(selectedTier)));button(d,secondary,"УЛУЧШИТЬ • ● "+format(state.tierUpgradeCost(selectedTier)),true,.66f);boolean merge=selectedTier<GnomeTier.values().length-1&&(GameState.FREE_SHOP||state.tierCounts[selectedTier]>=10);button(d,tertiary,GameState.FREE_SHOP?"TEST • СЛЕДУЮЩИЙ":"СЛИТЬ 10 → 1",merge,.60f);statPill(d,quaternary,"СУМКА • "+format((long)(gt.cargoCapacity*state.carryMultiplier(selectedTier))));}
 
-    private void drawUpgradePanel(Draw d){float ct=contentTop();d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.0f*ui;d.setColor(0xFFF0F3F5);d.text("ШАХТА И ИНФРАСТРУКТУРА",width/2,ct+17f*ui);d.bold=false;d.align=Draw.Align.LEFT;button(d,primary,"КИРКИ ур."+state.miningUpgrade,true,.70f);button(d,secondary,"ЛОГИСТИКА ур."+state.speedUpgrade,true,.66f);button(d,tertiary,"БОЙ ур."+state.combatUpgrade,true,.70f);button(d,quaternary,state.guardianLevel==0?"НАНЯТЬ СТРАЖА":"СТРАЖ ур."+state.guardianLevel,true,.66f);}
-    private void drawArtifactPanel(Draw d){ArtifactType a=ArtifactType.values()[selectedArtifact];float ct=contentTop();button(d,left,"‹",selectedArtifact>0,1.15f);button(d,right,"›",selectedArtifact<ArtifactType.values().length-1,1.15f);boolean owned=state.artifactOwned(selectedArtifact),active=owned&&state.artifactActive[selectedArtifact];d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.2f*ui;d.setColor(a.color);d.text(a.title,width/2,ct+14f*ui);d.bold=false;d.textSize=4.8f*ui;d.setColor(0xFFB5BFC7);d.text(ellipsize(a.description,27),width/2,ct+30f*ui);d.textSize=4.5f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text(owned?(active?"АКТИВЕН":"СНЯТ"):"НЕ КУПЛЕН",width/2,ct+43f*ui);d.align=Draw.Align.LEFT;button(d,primary,owned?(active?"СНЯТЬ":"НАДЕТЬ"):"КУПИТЬ • ◆"+state.artifactCost(selectedArtifact),true,.62f);statPill(d,secondary,"ПОКУПАЕТСЯ 1 РАЗ");statPill(d,tertiary,owned?"КУПЛЕН":"НУЖНЫ ◆ АЛМАЗЫ");statPill(d,quaternary,active?"АКТИВЕН":"НЕ АКТИВЕН");}
+    private void drawUpgradePanel(Draw d){float ct=contentTop();d.align=Draw.Align.CENTER;d.bold=true;d.textSize=6.5f*ui;d.setColor(0xFFF0F3F5);d.text("ШАХТА И ИНФРАСТРУКТУРА • СЕРЕБРО",width/2,ct+17f*ui);d.bold=false;d.align=Draw.Align.LEFT;button(d,primary,"КИРКИ ур."+state.miningUpgrade+" • Ag "+state.globalUpgradeCost(0),true,.62f);button(d,secondary,"ЛОГИСТИКА ур."+state.speedUpgrade+" • Ag "+state.globalUpgradeCost(1),true,.58f);button(d,tertiary,"БОЙ ур."+state.combatUpgrade+" • Ag "+state.globalUpgradeCost(2),true,.62f);button(d,quaternary,(state.guardianLevel==0?"НАНЯТЬ СТРАЖА":"СТРАЖ ур."+state.guardianLevel)+" • "+state.guardianCostLabel(),true,.56f);}
+    private void drawArtifactPanel(Draw d){ArtifactType a=ArtifactType.values()[selectedArtifact];float ct=contentTop();button(d,left,"‹",selectedArtifact>0,1.15f);button(d,right,"›",selectedArtifact<ArtifactType.values().length-1,1.15f);boolean owned=state.artifactOwned(selectedArtifact),active=owned&&state.artifactActive[selectedArtifact];d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.2f*ui;d.setColor(a.color);d.text(a.title,width/2,ct+14f*ui);d.bold=false;d.textSize=4.8f*ui;d.setColor(0xFFB5BFC7);d.text(ellipsize(a.description,27),width/2,ct+30f*ui);d.textSize=4.5f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text(owned?(active?"АКТИВЕН":"СНЯТ"):"НЕ КУПЛЕН",width/2,ct+43f*ui);d.align=Draw.Align.LEFT;button(d,primary,owned?(active?"СНЯТЬ":"НАДЕТЬ"):"КУПИТЬ • Au "+state.artifactCost(selectedArtifact),true,.62f);statPill(d,secondary,"ПОКУПАЕТСЯ 1 РАЗ");statPill(d,tertiary,owned?"КУПЛЕН":"НУЖНО ЗОЛОТО");statPill(d,quaternary,active?"АКТИВЕН":"НЕ АКТИВЕН");}
 
     private void drawRunePanel(Draw d){RuneType r=RuneType.values()[selectedRune];float ct=contentTop();button(d,left,"‹",selectedRune>0,1.15f);button(d,right,"›",selectedRune<RuneType.values().length-1,1.15f);boolean active=state.runeIsActive(selectedRune);d.align=Draw.Align.CENTER;d.bold=true;d.textSize=7.2f*ui;d.setColor(r.color);d.text(r.title,width/2,ct+14f*ui);d.bold=false;d.textSize=4.8f*ui;d.setColor(0xFFB7C0C7);d.text(ellipsize(r.description,27),width/2,ct+30f*ui);d.textSize=4.5f*ui;d.setColor(active?0xFF7FDEA0:0xFFAAB4BB);d.text("УР. "+state.runeLevels[selectedRune]+" • "+(active?"АКТИВНА":"СНЯТА"),width/2,ct+43f*ui);d.align=Draw.Align.LEFT;button(d,primary,"УСИЛИТЬ • ◆"+state.runeUpgradeCost(selectedRune),state.runeLevels[selectedRune]<12,.58f);button(d,secondary,active?"СНЯТЬ РУНУ":"АКТИВИРОВАТЬ",state.runeLevels[selectedRune]>0,.54f);statPill(d,tertiary,"НА ВСЕХ ГНОМОВ");statPill(d,quaternary,"МЕТА • НАВСЕГДА");}
 
@@ -1454,7 +1519,7 @@ public final class CaveScreen extends ScreenAdapter {
         for(int i=0;i<tabs.length;i++)if(tabs[i].hit(x,y)){tab=Tab.values()[i];return true;}
         if(left.hit(x,y)){switch(tab){case GNOMES->selectedTier=Math.max(0,selectedTier-1);case ARTIFACTS->selectedArtifact=Math.max(0,selectedArtifact-1);case RUNES->selectedRune=Math.max(0,selectedRune-1);default->{}}return true;}
         if(right.hit(x,y)){switch(tab){case GNOMES->selectedTier=Math.min(GnomeTier.values().length-1,selectedTier+1);case ARTIFACTS->selectedArtifact=Math.min(ArtifactType.values().length-1,selectedArtifact+1);case RUNES->selectedRune=Math.min(RuneType.values().length-1,selectedRune+1);default->{}}return true;}
-        if(primary.hit(x,y)){switch(tab){case GNOMES->{if(selectedTier==0&&state.buyMiner()){syncWorkers(false);toast="НОВЫЙ ГНОМ";toastTime=1.2f;}else if(selectedTier>0)toast="ГНОМЫ ЭТОГО ТИПА ПОЛУЧАЮТСЯ СЛИЯНИЕМ";}case UPGRADES->buyGlobal(0);case ARTIFACTS->{if(state.artifactOwned(selectedArtifact)){state.toggleArtifact(selectedArtifact);toast=state.artifactActive[selectedArtifact]?"АРТЕФАКТ АКТИВИРОВАН":"АРТЕФАКТ СНЯТ";}else if(state.buyArtifact(selectedArtifact))toast="АРТЕФАКТ КУПЛЕН";else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}case RUNES->{if(state.upgradeRune(selectedRune))toast="РУНА УСИЛЕНА";else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}}saveNow();return true;}
+        if(primary.hit(x,y)){switch(tab){case GNOMES->{if(selectedTier==0&&state.buyMiner()){syncWorkers(false);toast="НОВЫЙ ГНОМ";toastTime=1.2f;}else if(selectedTier>0)toast="ГНОМЫ ЭТОГО ТИПА ПОЛУЧАЮТСЯ СЛИЯНИЕМ";}case UPGRADES->buyGlobal(0);case ARTIFACTS->{if(state.artifactOwned(selectedArtifact)){state.toggleArtifact(selectedArtifact);toast=state.artifactActive[selectedArtifact]?"АРТЕФАКТ АКТИВИРОВАН":"АРТЕФАКТ СНЯТ";}else if(state.buyArtifact(selectedArtifact))toast="АРТЕФАКТ КУПЛЕН";else toast="НЕ ХВАТАЕТ ЗОЛОТА";toastTime=1.2f;}case RUNES->{if(state.upgradeRune(selectedRune))toast="РУНА УСИЛЕНА";else toast="НЕ ХВАТАЕТ АЛМАЗОВ";toastTime=1.2f;}}saveNow();return true;}
         if(secondary.hit(x,y)){switch(tab){case GNOMES->{if(state.upgradeTier(selectedTier))toast="ГНОМ УСИЛЕН";else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}case UPGRADES->buyGlobal(1);case RUNES->{if(state.toggleRune(selectedRune))toast=state.runeIsActive(selectedRune)?"РУНА АКТИВНА":"РУНА СНЯТА";else toast="СНАЧАЛА СОЗДАЙТЕ РУНУ";toastTime=1.2f;}default->{}}saveNow();return true;}
         if(tertiary.hit(x,y)){switch(tab){case GNOMES->{int next=Math.min(GnomeTier.values().length-1,selectedTier+1);boolean first=selectedTier<GnomeTier.values().length-1&&state.tierCounts[next]==0;if(state.mergeTier(selectedTier)){syncWorkers(false);toast=state.depth==1&&levelObjectiveMet()?"ЦЕЛЬ ВЫПОЛНЕНА • ПРОДВИНУТЫЙ ГНОМ":"ЭВОЛЮЦИЯ • 10 → 1";toastTime=1.6f;if(first){unlockTier=next;unlockAnim=0;addNotice("ОТКРЫТ НОВЫЙ ГНОМ",GnomeTier.values()[next].color,2.4f);game.audio.play(GameAudio.Sfx.COIN,.80f);}}}case UPGRADES->buyGlobal(2);default->{}}saveNow();return true;}
         if(quaternary.hit(x,y)){switch(tab){case UPGRADES->{int before=state.guardianLevel;if(state.buyOrUpgradeGuardian()){toast="СТРАЖ СУНДУКА • ур."+state.guardianLevel;guardianDead=false;guardianMaxHp=state.guardianMaxHp();guardianHp=guardianMaxHp;guardianX=cx(map.startCol)-Math.min(cellW,cellH)*.28f;guardianY=cy(map.startRow);guardianSpawnAnim=.70f;}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.3f;}case RUNES->{toast="РУНЫ ТЕПЕРЬ ГЛОБАЛЬНЫЕ";toastTime=1.1f;}default->{}}saveNow();return true;}
@@ -1472,6 +1537,14 @@ public final class CaveScreen extends ScreenAdapter {
         for(CaveHazard h:hazards)if(h.type==HazardType.COLLAPSE&&h.obstacleActive&&!h.cleared&&distance(x,y,h.x,h.y)<=h.r*1.15f){
             longPressEligible=false;priorityKind=PriorityKind.HAZARD;priorityHazard=h;priorityMob=null;priorityVein=null;priorityCell=h.cell;priorityX=h.x;priorityY=h.y;resetWorkerRoutes();
             toast="ПРИКАЗ • РАЗОБРАТЬ ОБВАЛ";toastTime=1.5f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(18);return true;
+        }
+
+        BonusCache bonus=null;float bonusD=Float.MAX_VALUE;
+        for(BonusCache b:bonuses){if(b.taken)continue;float q=dist2(x,y,b.x,b.y);if(q<bonusD){bonusD=q;bonus=b;}}
+        float bonusRadius=Math.min(cellW,cellH)*.62f;
+        if(bonus!=null&&bonusD<=bonusRadius*bonusRadius){
+            longPressEligible=false;priorityKind=PriorityKind.POINT;priorityVein=null;priorityMob=null;priorityHazard=null;priorityCell=bonus.cell;priorityX=bonus.x;priorityY=bonus.y;resetWorkerRoutes();
+            toast="ПРИКАЗ • ЗАБРАТЬ ТАЙНИК";toastTime=1.35f;game.audio.play(GameAudio.Sfx.UI,.72f);game.audio.vibrate(16);return true;
         }
 
         Vein best=null;float bd=Float.MAX_VALUE;
@@ -1510,7 +1583,7 @@ public final class CaveScreen extends ScreenAdapter {
     };}
 
 
-    private void buyGlobal(int kind){if(state.buyGlobalUpgrade(kind)){toast="УЛУЧШЕНИЕ КУПЛЕНО";}else toast="НЕ ХВАТАЕТ РЕСУРСОВ";toastTime=1.2f;}
+    private void buyGlobal(int kind){if(state.buyGlobalUpgrade(kind)){toast="УЛУЧШЕНИЕ КУПЛЕНО";}else toast="НЕ ХВАТАЕТ СЕРЕБРА";toastTime=1.2f;}
 
     private long cargoValue(){
         double value=0;for(Worker w:workers)value+=w.cargoStone+w.cargoSilver*8d+w.cargoGold*20d+w.cargoDiamond*100d;

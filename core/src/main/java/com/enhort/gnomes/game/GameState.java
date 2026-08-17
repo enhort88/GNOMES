@@ -176,6 +176,19 @@ public class GameState {
         return whole;
     }
 
+    /** Direct find from a dead-end cache; chest multipliers do not apply. */
+    public long grantBonus(RockType.Material material, long amount) {
+        long whole = Math.max(0L, amount);
+        switch (material) {
+            case STONE -> stone += whole;
+            case SILVER -> silver += whole;
+            case GOLD -> gold += whole;
+            case DIAMOND -> diamond += whole;
+        }
+        levelEarnedValue += materialValue(material, whole);
+        return whole;
+    }
+
     private static float upgradeCurve(int level, float early, float late) {
         int a = Math.min(10, Math.max(0, level));
         int b = Math.min(20, Math.max(0, level - 10));
@@ -244,32 +257,22 @@ public class GameState {
 
     public long guardianCost() {
         if (FREE_SHOP) return 0;
-        return Math.round(900d * Math.pow(2.05, guardianLevel));
+        return Math.round(24d * Math.pow(1.85, guardianLevel));
     }
 
     public boolean buyOrUpgradeGuardian() {
         long cost = guardianCost();
         if (!FREE_SHOP) {
-            if (guardianLevel < 3) {
-                if (stone < cost) return false;
-                stone -= cost;
-                levelInvestedValue += cost;
-            } else {
-                long silverCost = Math.max(40, cost / 95);
-                if (silver < silverCost) return false;
-                silver -= silverCost;
-                levelInvestedValue += silverCost * 8L;
-            }
+            if (silver < cost) return false;
+            silver -= cost;
+            levelInvestedValue += cost * 8L;
         }
         guardianLevel++;
         return true;
     }
 
     public String guardianCostLabel() {
-        if (FREE_SHOP) return "БЕСПЛАТНО";
-        long cost = guardianCost();
-        if (guardianLevel < 3) return cost + " кам";
-        return Math.max(40, cost / 95) + " Ag";
+        return FREE_SHOP ? "БЕСПЛАТНО" : guardianCost() + " Ag";
     }
 
     /** Base scale shared by enemies that have existed since the early levels. */
@@ -361,21 +364,9 @@ public class GameState {
         if (tier < 0 || tier >= tierLevels.length) return false;
         long cost = tierUpgradeCost(tier);
         if (!FREE_SHOP) {
-            if (tier < 2) {
-                if (stone < cost) return false;
-                stone -= cost;
-                levelInvestedValue += cost;
-            } else if (tier < 4) {
-                long paid = Math.max(1, cost / 90);
-                if (silver < paid) return false;
-                silver -= paid;
-                levelInvestedValue += paid * 8L;
-            } else {
-                long paid = Math.max(1, cost / 180);
-                if (gold < paid) return false;
-                gold -= paid;
-                levelInvestedValue += paid * 20L;
-            }
+            if (stone < cost) return false;
+            stone -= cost;
+            levelInvestedValue += cost;
         }
         tierLevels[tier]++;
         return true;
@@ -384,10 +375,11 @@ public class GameState {
     public long globalUpgradeCost(int kind) {
         if (FREE_SHOP) return 0;
         int lvl = kind == 0 ? miningUpgrade : kind == 1 ? speedUpgrade : combatUpgrade;
-        return Math.round((220 + kind * 150L) * Math.pow(1.82, lvl));
+        return Math.round((18 + kind * 7L) * Math.pow(1.65, lvl));
     }
 
     public boolean buyGlobalUpgrade(int kind) {
+        if (kind < 0 || kind > 2) return false;
         if (FREE_SHOP) {
             if (kind == 0) miningUpgrade++;
             else if (kind == 1) speedUpgrade++;
@@ -395,23 +387,18 @@ public class GameState {
             return true;
         }
         long cost = globalUpgradeCost(kind);
-        if (kind == 0) {
-            if (stone < cost) return false;
-            stone -= cost; levelInvestedValue += cost; miningUpgrade++; return true;
-        }
-        if (kind == 1) {
-            long paid = Math.max(3, cost / 90);
-            if (silver < paid) return false;
-            silver -= paid; levelInvestedValue += paid * 8L; speedUpgrade++; return true;
-        }
-        long paid = Math.max(2, cost / 150);
-        if (gold < paid) return false;
-        gold -= paid; levelInvestedValue += paid * 20L; combatUpgrade++; return true;
+        if (silver < cost) return false;
+        silver -= cost;
+        levelInvestedValue += cost * 8L;
+        if (kind == 0) miningUpgrade++;
+        else if (kind == 1) speedUpgrade++;
+        else combatUpgrade++;
+        return true;
     }
 
     public int artifactCost(int artifactIndex) {
         if (FREE_SHOP) return 0;
-        int[] costs = {18, 32, 48, 70};
+        int[] costs = {8, 14, 22, 34};
         return costs[Math.max(0, Math.min(costs.length - 1, artifactIndex))];
     }
 
@@ -425,8 +412,9 @@ public class GameState {
         if (artifactIndex < 0 || artifactIndex >= artifactLevels.length || artifactLevels[artifactIndex] > 0) return false;
         int cost = artifactCost(artifactIndex);
         if (!FREE_SHOP) {
-            if (diamond < cost) return false;
-            diamond -= cost;
+            if (gold < cost) return false;
+            gold -= cost;
+            levelInvestedValue += cost * 20L;
         }
         artifactLevels[artifactIndex] = 1;
         artifactActive[artifactIndex] = true;
