@@ -4,7 +4,7 @@ import re
 p = Path('core/src/main/java/com/enhort/gnomes/game/CaveScreen.java')
 s = p.read_text()
 
-pat = r'    private void drawLevelSummary\(Draw d\)\{.*?\n    \}\n\n    private void drawGameOver'
+pat = r'    private void drawLevelSummary\(Draw d\)\{.*?\n    \}\n(?:\s*\n)+    private void drawGameOver'
 repl = '''    private void drawLevelSummary(Draw d){
         d.setColor(0xE6090705);d.fillRect(0,0,width,height);
         float cw=Math.min(width-18f*ui,390f*ui),l=(width-cw)/2f,t=Math.max(18f*ui,height*.055f),b=Math.min(height-16f*ui,height*.91f),p=Math.min(1f,summaryAnim/1.2f);
