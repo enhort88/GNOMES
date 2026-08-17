@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
 
+# retry: keep the objective font fixed while only the pulse animates
 jobs:
   fix:
     runs-on: ubuntu-latest
