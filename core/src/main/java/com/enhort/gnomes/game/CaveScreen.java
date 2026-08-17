@@ -644,17 +644,32 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void carryHome(Worker w,float dt){
-        int home=map.index(map.startCol,map.startRow);
-        if(!atCell(w,home)){w.action=WorkerAction.CARRY;routeWorker(w,home);followWorker(w,moveSpeed(w)*.94f,dt);return;}
-        w.action=WorkerAction.IDLE;w.vx=w.vy=0;
-        if(w.hasCargo()){
-            if(w.cargoStone>0)state.deposit(RockType.Material.STONE,w.cargoStone);
-            if(w.cargoSilver>0)state.deposit(RockType.Material.SILVER,w.cargoSilver);
-            if(w.cargoGold>0)state.deposit(RockType.Material.GOLD,w.cargoGold);
-            if(w.cargoDiamond>0)state.deposit(RockType.Material.DIAMOND,w.cargoDiamond);
-            w.clearCargo();spawnSparks(cx(map.startCol),cy(map.startRow),0xFFFFCC63,5);game.audio.play(GameAudio.Sfx.COIN,.42f);
+    int home=map.index(map.startCol,map.startRow);
+    float hx=cx(map.startCol),hy=cy(map.startRow);
+    float depositRadius=Math.min(cellW,cellH)*.27f;
+    if(distance(w.x,w.y,hx,hy)>depositRadius){
+        w.action=WorkerAction.CARRY;
+        // cellFor() switches to the chest cell before the worker necessarily reaches its centre.
+        // A one-node path used to start at index 1 and could freeze a gnome with a full sack.
+        // Inside the home cell we finish the last few pixels directly instead of rerouting.
+        if(cellFor(w.x,w.y)==home){
+            w.path=new int[0];w.pathIndex=0;w.goalCell=home;
+            moveDirect(w,hx,hy,moveSpeed(w)*.94f,dt);
+        }else{
+            routeWorker(w,home);
+            followWorker(w,moveSpeed(w)*.94f,dt);
         }
+        return;
     }
+    w.action=WorkerAction.IDLE;w.vx=w.vy=0;w.path=new int[0];w.pathIndex=0;w.goalCell=-1;
+    if(w.hasCargo()){
+        if(w.cargoStone>0)state.deposit(RockType.Material.STONE,w.cargoStone);
+        if(w.cargoSilver>0)state.deposit(RockType.Material.SILVER,w.cargoSilver);
+        if(w.cargoGold>0)state.deposit(RockType.Material.GOLD,w.cargoGold);
+        if(w.cargoDiamond>0)state.deposit(RockType.Material.DIAMOND,w.cargoDiamond);
+        w.clearCargo();spawnSparks(hx,hy,0xFFFFCC63,5);game.audio.play(GameAudio.Sfx.COIN,.42f);
+    }
+}
 
     private void fight(Worker w,Mob m,float dt){
         int cell=cellFor(m.x,m.y);
@@ -678,9 +693,15 @@ public final class CaveScreen extends ScreenAdapter {
 
     private float moveSpeed(Worker w){return w.tier.moveSpeed*state.speedMultiplier(w.tier.ordinal())*ui;}
     private void routeWorker(Worker w,int goal){
-        if(w.goalCell==goal&&w.path.length>0)return;if(w.goalCell==goal&&w.routeRetry>0)return;
-        w.goalCell=goal;boolean[] danger=dangerMask(w);w.path=map.pathAvoiding(cellFor(w.x,w.y),goal,danger);w.pathIndex=Math.min(1,w.path.length);w.routeRetry=w.path.length==0?.28f:0f;
+    int start=cellFor(w.x,w.y);
+    if(start==goal){
+        // A one-cell route still has to move the worker toward that cell centre.
+        // Starting such a route at index 1 marked it complete immediately.
+        w.goalCell=goal;w.path=new int[]{goal};w.pathIndex=0;w.routeRetry=0;return;
     }
+    if(w.goalCell==goal&&w.path.length>0)return;if(w.goalCell==goal&&w.routeRetry>0)return;
+    w.goalCell=goal;boolean[] danger=dangerMask(w);w.path=map.pathAvoiding(start,goal,danger);w.pathIndex=Math.min(1,w.path.length);w.routeRetry=w.path.length==0?.28f:0f;
+}
     private boolean[] dangerMask(Worker w){
         boolean[] mask=null;int smart=w.tier.ordinal();
         for(CaveHazard h:hazards){if(h.type==HazardType.COLLAPSE||h.cleared)continue;boolean seen=h.fired||(smart>=2&&h.age>.22f)||(smart>=4&&h.age>.05f);if(!seen)continue;if(mask==null)mask=new boolean[map.cols*map.rows];mask[h.cell]=true;if(smart>=4){int c=map.col(h.cell),r=map.row(h.cell);int[] dirs={CaveMap.N,CaveMap.E,CaveMap.S,CaveMap.W};for(int dir:dirs){int nc=c+CaveMap.dx(dir),nr=r+CaveMap.dy(dir);if(map.inside(nc,nr)&&h.type==HazardType.LAVA)mask[map.index(nc,nr)]=true;}}
