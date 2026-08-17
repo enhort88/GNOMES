@@ -132,6 +132,7 @@ public final class CaveScreen extends ScreenAdapter {
     private float worldL,worldT,worldR,worldB,cellW,cellH;
     private float elapsed,enemyTimer=13f,hazardTimer=18f,saveTimer,levelClearTimer=-1f,screenShake,recoveryTimer;
     private boolean speedHeld;
+    private float speedTouchX,speedTouchY;
     private PriorityKind priorityKind=PriorityKind.NONE;
     private Vein priorityVein;
     private Mob priorityMob;
@@ -181,7 +182,7 @@ public final class CaveScreen extends ScreenAdapter {
                 if(unlockTier>=0){if(unlockOk.hit(x,y)||unlockAnim>.35f){unlockTier=-1;game.audio.play(GameAudio.Sfx.UI,.55f);}return true;}
                 if(levelSummary){if(summaryOk.hit(x,y)&&summaryAnim>.75f)finishLevelTransition();return true;}
                 if(gameOver){if(gameOverOk.hit(x,y)){saveNow();game.openMenu();}return true;}
-                if(speed.hit(x,y)){speedHeld=true;game.audio.play(GameAudio.Sfx.UI,.55f);return true;}
+                if(speed.hit(x,y)){speedHeld=true;speedTouchX=x;speedTouchY=y;game.audio.play(GameAudio.Sfx.UI,.55f);return true;}
                 if(tab==Tab.GNOMES&&selectedTier==0&&primary.hit(x,y)){buyHold=true;buyHoldStarted=elapsed;buyRepeat=.32f;return handleTap(x,y);}
                 if(y>=worldT&&y<=worldB){
                     worldTouchActive=true;longPressEligible=true;longPressHandled=false;worldTouchStarted=elapsed;worldTouchX=x;worldTouchY=y;
@@ -191,6 +192,7 @@ public final class CaveScreen extends ScreenAdapter {
             }
             @Override public boolean touchUp(int sx,int sy,int pointer,int button){speedHeld=false;buyHold=false;worldTouchActive=false;longPressEligible=false;return true;}
             @Override public boolean touchDragged(int sx,int sy,int pointer){
+                if(speedHeld&&speed.hit(sx,sy)){speedTouchX=sx;speedTouchY=sy;}
                 if(!speed.hit(sx,sy))speedHeld=false;
                 if(buyHold&&!primary.hit(sx,sy))buyHold=false;
                 if(worldTouchActive&&distance(worldTouchX,worldTouchY,sx,sy)>16f*ui)longPressEligible=false;
@@ -574,6 +576,7 @@ public final class CaveScreen extends ScreenAdapter {
     }
 
     private void updateWorkers(float dt){
+        boolean veinsExhausted=noLivingVeins();
         int defendersLeft=state.guardianLevel>0?guardianDefenderQuota():workers.size();
         int[] veinLoad=new int[veins.size()];
         for(Worker worker:workers){int vi=veinIndex(worker.vein);if(vi>=0&&!worker.vein.dead&&!map.isBlocked(worker.vein.cell))veinLoad[vi]++;}
@@ -584,6 +587,10 @@ public final class CaveScreen extends ScreenAdapter {
             if(w.spawn>0){w.action=WorkerAction.IDLE;w.vx=w.vy=0;continue;}
             if(w.stun>0){w.action=WorkerAction.STUNNED;w.vx=w.vy=0;continue;}
             if(w.charm>0){fightAlly(w,dt);continue;}
+
+            // Once the mine is exhausted, unfinished cargo must reach the chest before anyone picks a fight
+            // or obeys an old map order. Otherwise a few units can sit forever in half-filled bags.
+            if(veinsExhausted&&w.hasCargo()){w.mob=null;w.vein=null;carryHome(w,dt);continue;}
 
             // Direct player orders always win. No ambient rubble job is allowed to hijack them.
             if(priorityKind==PriorityKind.VEIN&&priorityVein!=null&&!priorityVein.dead){w.mob=null;w.vein=priorityVein;mine(w,priorityVein,dt);continue;}
@@ -1468,7 +1475,7 @@ public final class CaveScreen extends ScreenAdapter {
         button(d,back,"‹",true,1.20f);
         d.align=Draw.Align.LEFT;d.bold=true;d.textSize=10.8f*ui;d.setColor(0xFFF2EFE7);d.text("GNOMES",58f*ui,21f*ui);
         d.bold=false;d.textSize=6.2f*ui;d.setColor(UiTheme.GOLD);d.text("ГЛУБИНА "+state.depth,58f*ui,42f*ui);
-        d.align=Draw.Align.CENTER;d.textSize=5.4f*ui;d.setColor(levelObjectiveMet()?0xFF79C98A:0xFFE2B544);d.text(levelObjectiveHud(),width*.66f,42f*ui);
+        drawObjectiveHud(d);
         if(levelEvent!=LevelEvent.NONE){d.textSize=3.7f*ui;d.setColor(levelEventColor());d.text(levelEventTitle(),width*.66f,52f*ui);}
         d.align=Draw.Align.LEFT;
         float y=69f*ui,section=width/4f;
@@ -1478,6 +1485,20 @@ public final class CaveScreen extends ScreenAdapter {
         drawResource(d,section*3+5f*ui,y,0xFF67D7F2,"◆",state.diamond);
         drawActiveEffects(d);
     }
+    private void drawObjectiveHud(Draw d){
+        float pulse=.5f+.5f*(float)Math.sin(elapsed*3.0f);
+        float cx=width*.66f,cy=42f*ui,w=Math.min(width*.52f,210f*ui);
+        int col=levelObjectiveMet()?0xFF79C98A:0xFFE2B544;
+        d.setColor(alpha(col,.035f+.055f*pulse));
+        d.fillRoundRect(cx-w*.5f,cy-10f*ui,cx+w*.5f,cy+9f*ui,7f*ui);
+        d.setColor(alpha(col,.22f+.36f*pulse));
+        d.fillRoundRect(cx-w*.34f,cy+8.5f*ui,cx+w*.34f,cy+9.7f*ui,.7f*ui);
+        d.setColor(alpha(col,.40f+.45f*pulse));
+        float dot=1.4f*ui+.7f*ui*pulse;
+        d.fillCircle(cx-w*.43f,cy-1f*ui,dot);d.fillCircle(cx+w*.43f,cy-1f*ui,dot);
+        d.align=Draw.Align.CENTER;d.bold=pulse>.62f;d.textSize=(5.25f+.22f*pulse)*ui;d.setColor(col);d.text(levelObjectiveHud(),cx,cy);d.bold=false;
+    }
+
     private void drawActiveEffects(Draw d){float x=width-8f*ui,y=worldT+10f*ui;int n=0;for(int i=0;i<state.artifactActive.length;i++)if(state.artifactOwned(i)&&state.artifactActive[i]){ArtifactType a=ArtifactType.values()[i];x-=15f*ui;d.setColor(alpha(a.color,.28f));d.fillCircle(x,y,6f*ui);d.setColor(a.color);d.strokeWidth=1.2f*ui;d.strokeCircle(x,y,4f*ui);n++;}for(int i=0;i<state.runeActive.length;i++)if(state.runeIsActive(i)){x-=15f*ui;drawRune(d,x,y,3.4f*ui,RuneType.values()[i]);n++;if(n>10)break;}}
     private void drawResource(Draw d,float x,float y,int col,String icon,long n){d.setColor(col);d.fillCircle(x+5f*ui,y-4f*ui,3.6f*ui);d.bold=true;d.textSize=6.4f*ui;d.text(icon+" "+format(n),x+12f*ui,y);d.bold=false;}
 
@@ -1486,14 +1507,16 @@ public final class CaveScreen extends ScreenAdapter {
         String[] names={"ГНОМЫ","АПГРЕЙДЫ","АРТЕФ.","РУНЫ"};
         for(int i=0;i<4;i++)UiTheme.tab(d,tabs[i].l,tabs[i].t,tabs[i].r,tabs[i].b,ui,names[i],tab.ordinal()==i,UiTheme.GOLD);
         switch(tab){case GNOMES->drawGnomePanel(d);case UPGRADES->drawUpgradePanel(d);case ARTIFACTS->drawArtifactPanel(d);case RUNES->drawRunePanel(d);}
-        if(speedHeld)drawSpeedGlow(d);
         button(d,speed,speedHeld?"УСКОРЕНИЕ":"УСКОРИТЬ ГНОМОВ",true,.86f);
+        if(speedHeld)drawSpeedGlow(d);
     }
     private void drawSpeedGlow(Draw d){
-        float pulse=.5f+.5f*(float)Math.sin(elapsed*11f);
-        for(int i=3;i>=1;i--){float pad=(3f+i*3.5f+pulse*2f)*ui;d.setColor(alpha(0xFFFFD45C,.045f+i*.025f));d.fillRoundRect(speed.l-pad,speed.t-pad,speed.r+pad,speed.b+pad,(12f+i*3f)*ui);}
-        d.setColor(alpha(0xFFFFE88A,.65f+.25f*pulse));
-        for(int i=0;i<10;i++){float q=(elapsed*(.28f+i*.013f)+i*.103f)%1f,x=speed.l+(speed.r-speed.l)*q,y=(i&1)==0?speed.t-3f*ui:speed.b+3f*ui;d.fillCircle(x,y,(1.4f+(i%3)*.45f)*ui);}
+        float tx=Math.max(speed.l+18f*ui,Math.min(speed.r-18f*ui,speedTouchX));
+        float ty=Math.max(speed.t+10f*ui,Math.min(speed.b-10f*ui,speedTouchY));
+        float pulse=.5f+.5f*(float)Math.sin(elapsed*10f),ring=(15f+4f*pulse)*ui;
+        d.setColor(alpha(0xFFFFE58A,.22f+.20f*pulse));d.strokeWidth=(1.4f+1.0f*pulse)*ui;d.strokeCircle(tx,ty,ring);
+        d.setColor(alpha(0xFFFFD35A,.55f+.30f*pulse));
+        for(int i=0;i<7;i++){float a=elapsed*(2.3f+i*.07f)+i*.897f,r=ring*(.72f+.22f*((i%3)/2f));d.fillCircle(tx+(float)Math.cos(a)*r,ty+(float)Math.sin(a)*r,(1.0f+(i%3)*.45f)*ui);}
     }
 
     private float contentTop(){return tabs[0].b+5f*ui;}

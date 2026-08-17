@@ -33,16 +33,24 @@ public final class UiTheme {
         d.setColor(0x77000000);
         d.fillRoundRect(l + 1.5f * ui, t + 3.5f * ui, r + 1.5f * ui, b + 3.5f * ui, radius);
 
-        d.setColor(enabled ? (pressed ? 0xFF20262A : 0xFF252C31) : 0xFF171B1E);
+        d.setColor(enabled ? (pressed ? 0xFF493A1E : 0xFF252C31) : 0xFF171B1E);
         d.fillRoundRect(l, t + down, r, b + down, radius);
 
-        d.setColor(enabled ? 0xFF3E474D : 0xFF242A2E);
+        d.setColor(enabled ? (pressed ? 0xFF6A5225 : 0xFF3E474D) : 0xFF242A2E);
         d.fillRoundRect(l + 1f * ui, t + 1f * ui + down, r - 1f * ui, b - 1f * ui + down,
                 Math.max(3f * ui, radius - 1f * ui));
 
-        d.setColor(enabled ? 0xFF22282C : 0xFF191D20);
+        d.setColor(enabled ? (pressed ? 0xFF302B20 : 0xFF22282C) : 0xFF191D20);
         d.fillRoundRect(l + 2f * ui, t + 3f * ui + down, r - 2f * ui, b - 2f * ui + down,
                 Math.max(3f * ui, radius - 2f * ui));
+
+        if (pressed && enabled) {
+            d.setColor(0x335A4315);
+            d.fillRoundRect(l + 4f * ui, t + 5f * ui + down, r - 4f * ui, b - 4f * ui + down,
+                    Math.max(3f * ui, radius - 3f * ui));
+            d.setColor(0x99FFD35A);
+            d.fillRect(l + 12f * ui, t + 4f * ui + down, r - 10f * ui, t + 5.4f * ui + down);
+        }
 
         if (enabled) {
             d.setColor(accent);
@@ -55,7 +63,7 @@ public final class UiTheme {
             d.align = Draw.Align.CENTER;
             d.bold = true;
             d.textSize = 10f * ui * textScale;
-            d.setColor(enabled ? 0xFFF4F1E9 : 0xFF626A70);
+            d.setColor(enabled ? (pressed ? 0xFFFFE8A5 : 0xFFF4F1E9) : 0xFF626A70);
             d.text(text, (l + r) * .5f, (t + b) * .5f + 3.4f * ui + down);
             d.align = Draw.Align.LEFT;
             d.bold = false;
