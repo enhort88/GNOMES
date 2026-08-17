@@ -88,6 +88,33 @@ public final class CaveMap {
         }
         ensureStartJunction();
         if (style == Style.RING) carveRing();
+        softenDeadEnds();
+    }
+
+    private void softenDeadEnds() {
+        List<Integer> ends = new ArrayList<>();
+        for (int r = 0; r < rows; r++) for (int c = 0; c < cols; c++) {
+            if (c == startCol && r == startRow) continue;
+            if (degree(c, r) == 1) ends.add(index(c, r));
+        }
+        Collections.shuffle(ends, new Random(seed ^ 0xD6E8FEB86659FD93L));
+        int connectCount = Math.max(0, Math.round(ends.size() * .62f));
+        for (int i = 0; i < connectCount; i++) {
+            int cell = ends.get(i), c = col(cell), r = row(cell);
+            if (degree(c, r) != 1) continue;
+            int[] order = {N, E, S, W};
+            shuffle(order);
+            int bestDir = 0, bestScore = Integer.MIN_VALUE;
+            for (int dir : order) {
+                if ((openings[r][c] & dir) != 0) continue;
+                int nc = c + dx(dir), nr = r + dy(dir);
+                if (!inside(nc, nr)) continue;
+                int score = degree(nc, nr) * 5;
+                if (nc > 0 && nc < cols - 1 && nr > 0 && nr < rows - 1) score += 3;
+                if (score > bestScore) { bestScore = score; bestDir = dir; }
+            }
+            if (bestDir != 0) connect(c, r, c + dx(bestDir), r + dy(bestDir), bestDir);
+        }
     }
 
     private void ensureStartJunction() {
